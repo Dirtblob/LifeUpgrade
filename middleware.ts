@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -18,12 +19,17 @@ const isPublicRoute = createRouteMatcher([
   "/api/recommendations(.*)",
 ]);
 const isApiRoute = createRouteMatcher(["/api(.*)"]);
+const clerkIsConfigured = Boolean(
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() && process.env.CLERK_SECRET_KEY?.trim(),
+);
 
-export default clerkMiddleware(async (auth, request) => {
+const authMiddleware = clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request) && !isApiRoute(request)) {
     await auth.protect();
   }
 });
+
+export default clerkIsConfigured ? authMiddleware : () => NextResponse.next();
 
 export const config = {
   matcher: [
