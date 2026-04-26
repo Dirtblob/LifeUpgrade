@@ -593,4 +593,86 @@ describe("product recommendation engine", () => {
     expect(recommendation.deviceDelta?.explanationFacts[0]).toContain("Better than");
     expect(recommendation.reasons.join(" ")).toContain("Better than");
   });
+
+  it("handles unrated Best Buy inventory without inventing trait fit", () => {
+    const ratedMouse = inventoryItem("mouse", {
+      name: "Rated ergonomic mouse",
+      deviceCatalogId: "mouse-rated",
+      catalogProductId: "mouse-rated",
+      hasCatalogRatings: true,
+      specs: {
+        catalogDeviceId: "mouse-rated",
+        traitRatings: {
+          wristComfort: 70,
+          ergonomicSupport: 72,
+        },
+      },
+    });
+    const unratedMouse = inventoryItem("mouse", {
+      name: "Best Buy gaming mouse",
+      rawProductTitle: "Best Buy gaming mouse",
+      source: "bestbuy",
+      priceCents: 4999,
+      hasCatalogRatings: false,
+      specs: {
+        traitRatings: {
+          wristComfort: 99,
+          ergonomicSupport: 99,
+        },
+      },
+    });
+    const candidate = product({
+      id: "upgrade-mouse",
+      name: "Upgrade Mouse",
+      category: "mouse",
+      solves: ["wrist_pain"],
+      traitRatings: {
+        wristComfort: 80,
+        ergonomicSupport: 80,
+      },
+      traitConfidence: 0.9,
+    });
+
+    const ratedRecommendation = rankProductsForInput(input({
+      profile: profile({ problems: ["wrist_pain"], budgetUsd: 200 }),
+      inventory: [ratedMouse],
+      candidateProducts: [candidate],
+    }))[0];
+    const unratedRecommendation = rankProductsForInput(input({
+      profile: profile({ problems: ["wrist_pain"], budgetUsd: 200 }),
+      inventory: [unratedMouse],
+      candidateProducts: [candidate],
+    }))[0];
+
+    expect(unratedRecommendation).toBeDefined();
+    expect(unratedRecommendation?.reasons).toContain("This item is not rated yet, so fit scoring is limited.");
+    expect(unratedRecommendation?.breakdown?.confidence).toBeLessThan(ratedRecommendation?.breakdown?.confidence ?? 100);
+    expect(unratedRecommendation?.deviceDelta?.explanationFacts).toContain("This item is not rated yet, so fit scoring is limited.");
+  });
+
+  it("still recommends products when inventory only contains custom unrated items", () => {
+    const recommendations = rankProductsForInput(input({
+      profile: profile({ problems: ["low_productivity"], budgetUsd: 300 }),
+      inventory: [
+        inventoryItem("keyboard", {
+          name: "My old keyboard",
+          rawProductTitle: "My old keyboard",
+          source: "custom",
+          hasCatalogRatings: false,
+          specs: undefined,
+        }),
+      ],
+      candidateProducts: [
+        product({
+          id: "keyboard-upgrade",
+          name: "Quiet Keyboard",
+          category: "keyboard",
+          solves: ["low_productivity"],
+        }),
+      ],
+    }));
+
+    expect(recommendations).toHaveLength(1);
+    expect(recommendations[0]?.reasons).toContain("This item is not rated yet, so fit scoring is limited.");
+  });
 });

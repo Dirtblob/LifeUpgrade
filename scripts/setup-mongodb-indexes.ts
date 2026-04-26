@@ -9,7 +9,17 @@ async function main(): Promise<void> {
   const db = await getMongoMigrationDb();
   printMongoWriteTarget({
     dbName: db.databaseName,
-    collections: ["users", "user_private_profiles", "inventory_items", "device_catalog", "recommendation_logs", "price_snapshots", "api_usage_events"],
+    collections: [
+      "users",
+      "user_private_profiles",
+      "inventory_items",
+      "device_catalog",
+      "recommendation_logs",
+      "price_snapshots",
+      "product_search_cache",
+      "catalog_enrichment_candidates",
+      "api_usage_events",
+    ],
     action: "prepare-write",
   });
   const summary = await setupMongoIndexes(db);

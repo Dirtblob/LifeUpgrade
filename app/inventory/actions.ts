@@ -6,6 +6,7 @@ import { getCachedAvailabilitySummaries } from "@/lib/availability";
 import { maybeAutoRefreshTopRecommendationPrice } from "@/lib/availability/autoRefresh";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
 import { db } from "@/lib/db";
+import { upsertCatalogEnrichmentCandidate } from "@/lib/catalog/enrichmentCandidates";
 import { getCurrentUserContext, type CurrentUserContext } from "@/lib/currentUser";
 import { deviceToInventorySpecs } from "@/lib/devices/deviceInventorySpecs";
 import { findMongoDeviceById } from "@/lib/devices/mongoDeviceCatalog";
@@ -25,6 +26,7 @@ import { buildToastHref } from "@/lib/ui/toasts";
 
 const allowedConditions = new Set(["POOR", "FAIR", "GOOD", "EXCELLENT", "UNKNOWN"]);
 const allowedCategories = new Set([...DEVICE_CATEGORIES, "storage", "cable_management", "other", "unknown"]);
+const productSearchSources = new Set(["catalog", "bestbuy", "custom"]);
 
 function getStringValue(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -34,6 +36,14 @@ function getStringValue(formData: FormData, key: string): string {
 function getNullableString(formData: FormData, key: string): string | null {
   const value = getStringValue(formData, key);
   return value.length > 0 ? value : null;
+}
+
+function getOptionalNumber(formData: FormData, key: string): number | null {
+  const value = getStringValue(formData, key);
+  if (!value) return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getRequiredString(formData: FormData, key: string): string {
@@ -82,6 +92,14 @@ async function getCatalogImport(formData: FormData): Promise<{
     };
   }
 
+  if (catalogProductId) {
+    return {
+      catalogProductId: null,
+      specs: null,
+      error: "Selected catalog device was not found. Please search again or save it as a custom device.",
+    };
+  }
+
   const postedSpecsJson = getStringValue(formData, "specsJson");
   if (postedSpecsJson) {
     try {
@@ -118,9 +136,40 @@ function getConditionValue(formData: FormData): MongoInventoryCreateInput["condi
   return allowedConditions.has(value) ? (value as MongoInventoryCreateInput["condition"]) : "UNKNOWN";
 }
 
+function getBooleanValue(formData: FormData, key: string): boolean {
+  return getStringValue(formData, key).toLowerCase() === "true";
+}
+
+function getProductSearchSource(formData: FormData, catalogProductId: string | null): MongoInventoryCreateInput["source"] {
+  if (catalogProductId) return "catalog";
+
+  const value = getStringValue(formData, "productSearchSource").toLowerCase();
+  return productSearchSources.has(value) ? (value as MongoInventoryCreateInput["source"]) : "custom";
+}
+
+async function enqueueCatalogEnrichmentCandidate(input: MongoInventoryCreateInput): Promise<void> {
+  if (input.hasCatalogRatings || input.catalogProductId || input.deviceCatalogId) return;
+  if (input.source !== "bestbuy" && input.source !== "custom") return;
+
+  const title = input.rawProductTitle ?? input.exactModel ?? [input.brand, input.model].filter(Boolean).join(" ");
+  if (!title.trim()) return;
+
+  await upsertCatalogEnrichmentCandidate({
+    title,
+    brand: input.brand,
+    model: input.model,
+    category: input.category,
+    source: input.source,
+    externalId: input.externalId,
+    productUrl: input.productUrl,
+    imageUrl: input.imageUrl,
+  });
+}
+
 function revalidateInventoryViews(): void {
   revalidatePath("/inventory");
   revalidatePath("/recommendations");
+  revalidatePath("/admin/enrichment-candidates");
 }
 
 async function requireCurrentUserContext(): Promise<CurrentUserContext> {
@@ -150,11 +199,20 @@ async function parseInventoryFormInput(formData: FormData): Promise<{
     model: getRequiredString(formData, "model"),
     exactModel: getNullableString(formData, "exactModel"),
     catalogProductId: catalogImport.catalogProductId,
+    deviceCatalogId: catalogImport.catalogProductId,
+    rawProductTitle: getNullableString(formData, "rawProductTitle"),
+    hasCatalogRatings: getBooleanValue(formData, "hasCatalogRatings") || Boolean(catalogImport.catalogProductId),
+    externalId: getNullableString(formData, "externalId"),
+    productUrl: getNullableString(formData, "productUrl"),
+    imageUrl: getNullableString(formData, "imageUrl"),
+    priceCents: getOptionalNumber(formData, "priceCents"),
+    currency: getNullableString(formData, "currency"),
+    productCondition: getNullableString(formData, "productCondition"),
     specs: catalogImport.specs,
     condition: getConditionValue(formData),
     ageYears: getAgeValue(formData),
     notes: getNullableString(formData, "notes"),
-    source: "MANUAL",
+    source: getProductSearchSource(formData, catalogImport.catalogProductId),
   });
 
   if (!result.data) {
@@ -181,6 +239,7 @@ export async function addInventoryItemAction(
   }
 
   await createDevInventoryItem(parsed.data);
+  await enqueueCatalogEnrichmentCandidate(parsed.data);
 
   revalidateInventoryViews();
   redirect(buildToastHref("/inventory", "item_added"));
@@ -206,6 +265,7 @@ export async function updateInventoryItemAction(
   }
 
   await updateDevInventoryItem(itemId, parsed.data);
+  await enqueueCatalogEnrichmentCandidate(parsed.data);
 
   revalidateInventoryViews();
   redirect(buildToastHref("/inventory", "item_updated"));

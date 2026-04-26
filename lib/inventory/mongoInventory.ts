@@ -5,7 +5,7 @@ import { getCurrentInventoryUserId } from "@/lib/devUser";
 import { getMongoDatabase } from "@/lib/mongodb";
 
 export type InventoryCondition = "POOR" | "FAIR" | "GOOD" | "EXCELLENT" | "UNKNOWN";
-export type InventorySource = "MANUAL" | "PHOTO" | "DEMO";
+export type InventorySource = "MANUAL" | "PHOTO" | "DEMO" | "catalog" | "bestbuy" | "custom";
 
 export interface MongoInventoryItem {
   _id: ObjectId | string;
@@ -18,6 +18,15 @@ export interface MongoInventoryItem {
   model: string | null;
   exactModel: string | null;
   catalogProductId: string | null;
+  deviceCatalogId?: string | null;
+  rawProductTitle?: string | null;
+  hasCatalogRatings?: boolean;
+  externalId?: string | null;
+  productUrl?: string | null;
+  imageUrl?: string | null;
+  priceCents?: number | null;
+  currency?: string | null;
+  productCondition?: string | null;
   specs: Record<string, unknown> | null;
   specsJson?: string | null;
   condition: InventoryCondition;
@@ -39,6 +48,15 @@ export interface InventoryApiItem {
   model: string | null;
   exactModel: string | null;
   catalogProductId: string | null;
+  deviceCatalogId: string | null;
+  rawProductTitle: string | null;
+  hasCatalogRatings: boolean;
+  externalId: string | null;
+  productUrl: string | null;
+  imageUrl: string | null;
+  priceCents: number | null;
+  currency: string | null;
+  productCondition: string | null;
   specs: Record<string, unknown> | null;
   specsJson: string | null;
   condition: InventoryCondition;
@@ -70,7 +88,7 @@ interface ValidationResult<T> {
 }
 
 const inventoryConditionValues = ["POOR", "FAIR", "GOOD", "EXCELLENT", "UNKNOWN"] as const;
-const inventorySourceValues = ["MANUAL", "PHOTO", "DEMO"] as const;
+const inventorySourceValues = ["MANUAL", "PHOTO", "DEMO", "catalog", "bestbuy", "custom"] as const;
 const MAX_PRICE_CENTS = 10_000_000;
 const MAX_PRICE_USD = 100_000;
 const MAX_TEXT_LENGTH = 1_000;
@@ -103,6 +121,16 @@ function normalizeUppercase(value: unknown): unknown {
   return typeof value === "string" ? sanitizeString(value).toUpperCase() : value;
 }
 
+function normalizeInventorySourceValue(value: unknown): unknown {
+  const normalized = emptyToUndefined(value);
+  if (normalized === undefined) return "custom";
+  if (typeof normalized !== "string") return normalized;
+
+  const source = sanitizeString(normalized).toLowerCase();
+  if (source === "catalog" || source === "bestbuy" || source === "custom") return source;
+  return source.toUpperCase();
+}
+
 function coerceNullableInt(value: unknown): unknown {
   const normalized = emptyToNull(value);
   if (normalized === null) return null;
@@ -116,6 +144,16 @@ function coerceNullableInt(value: unknown): unknown {
 function coerceOptionalNumber(value: unknown): unknown {
   const normalized = emptyToUndefined(value);
   if (normalized === undefined) return undefined;
+  if (typeof normalized === "number") return normalized;
+  if (typeof normalized !== "string") return normalized;
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : normalized;
+}
+
+function coerceNullableNumber(value: unknown): unknown {
+  const normalized = emptyToNull(value);
+  if (normalized === null) return null;
   if (typeof normalized === "number") return normalized;
   if (typeof normalized !== "string") return normalized;
 
@@ -180,6 +218,15 @@ export function serializeInventoryItem(item: MongoInventoryItem): InventoryApiIt
     model: item.model,
     exactModel: item.exactModel,
     catalogProductId: item.catalogProductId,
+    deviceCatalogId: item.deviceCatalogId ?? item.catalogProductId,
+    rawProductTitle: item.rawProductTitle ?? null,
+    hasCatalogRatings: item.hasCatalogRatings ?? Boolean(item.catalogProductId),
+    externalId: item.externalId ?? null,
+    productUrl: item.productUrl ?? null,
+    imageUrl: item.imageUrl ?? null,
+    priceCents: item.priceCents ?? null,
+    currency: item.currency ?? null,
+    productCondition: item.productCondition ?? null,
     specs,
     specsJson: specs ? JSON.stringify(specs) : null,
     condition: item.condition,
@@ -255,6 +302,28 @@ const optionalPriceUsdSchema = z.preprocess(
     .optional(),
 );
 
+const nullablePriceCentsSchema = z.preprocess(
+  coerceNullableNumber,
+  z
+    .number({ error: "Price must be a number." })
+    .int("Price must be whole cents.")
+    .min(0, "Price cannot be negative.")
+    .max(MAX_PRICE_CENTS, "Price is outside the supported range.")
+    .nullable(),
+);
+
+const booleanWithDefaultSchema = z.preprocess(
+  (value) => {
+    if (typeof value === "string") {
+      const normalized = sanitizeString(value).toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
+    }
+    return value;
+  },
+  z.boolean().default(false),
+);
+
 const traitScoreMapSchema = z.record(
   z.string().transform(sanitizeString).pipe(z.string().min(1, "Trait names cannot be empty.")),
   z
@@ -326,10 +395,19 @@ function normalizeInventoryPayload(payload: unknown): ValidationResult<Record<st
 const inventoryInputSchema = z.object({
   id: optionalIdSchema,
   category: requiredStringSchema("Category"),
-  brand: requiredStringSchema("Brand"),
-  model: requiredStringSchema("Model"),
+  brand: nullableStringSchema,
+  model: nullableStringSchema,
   exactModel: nullableStringSchema,
   catalogProductId: nullableStringSchema,
+  deviceCatalogId: nullableStringSchema,
+  rawProductTitle: nullableStringSchema,
+  hasCatalogRatings: booleanWithDefaultSchema,
+  externalId: nullableStringSchema,
+  productUrl: nullableStringSchema,
+  imageUrl: nullableStringSchema,
+  priceCents: nullablePriceCentsSchema,
+  currency: nullableStringSchema,
+  productCondition: nullableStringSchema,
   specs: nullableSpecsSchema,
   condition: z.preprocess(
     normalizeUppercase,
@@ -340,12 +418,11 @@ const inventoryInputSchema = z.object({
   ageYears: nullableAgeYearsSchema,
   notes: nullableStringSchema,
   source: z.preprocess(
-    (value) => (emptyToUndefined(value) === undefined ? "MANUAL" : normalizeUppercase(value)),
+    normalizeInventorySourceValue,
     z.enum(inventorySourceValues, {
-      error: "Source must be MANUAL, PHOTO, or DEMO.",
+      error: "Source must be MANUAL, PHOTO, DEMO, catalog, bestbuy, or custom.",
     }),
   ),
-  priceCents: optionalPriceCentsSchema,
   estimatedPriceCents: optionalPriceCentsSchema,
   typicalUsedPriceCents: optionalPriceCentsSchema,
   price: optionalPriceUsdSchema,
@@ -368,6 +445,7 @@ export function validateInventoryCreateInput(payload: unknown): ValidationResult
   }
 
   const input = result.data;
+  const deviceCatalogId = input.deviceCatalogId ?? input.catalogProductId;
 
   return {
     data: {
@@ -377,6 +455,15 @@ export function validateInventoryCreateInput(payload: unknown): ValidationResult
       model: input.model,
       exactModel: input.exactModel,
       catalogProductId: input.catalogProductId,
+      deviceCatalogId,
+      rawProductTitle: input.rawProductTitle,
+      hasCatalogRatings: input.hasCatalogRatings || Boolean(deviceCatalogId),
+      externalId: input.externalId,
+      productUrl: input.productUrl,
+      imageUrl: input.imageUrl,
+      priceCents: input.priceCents,
+      currency: input.currency,
+      productCondition: input.productCondition,
       specs: input.specs,
       condition: input.condition,
       ageYears: input.ageYears,
@@ -401,12 +488,20 @@ export function validateInventoryUpdateInput(
     model: fieldOrExisting("model"),
     exactModel: fieldOrExisting("exactModel"),
     catalogProductId: fieldOrExisting("catalogProductId"),
+    deviceCatalogId: fieldOrExisting("deviceCatalogId"),
+    rawProductTitle: fieldOrExisting("rawProductTitle"),
+    hasCatalogRatings: fieldOrExisting("hasCatalogRatings"),
+    externalId: fieldOrExisting("externalId"),
+    productUrl: fieldOrExisting("productUrl"),
+    imageUrl: fieldOrExisting("imageUrl"),
+    priceCents: fieldOrExisting("priceCents"),
+    currency: fieldOrExisting("currency"),
+    productCondition: fieldOrExisting("productCondition"),
     specs: fieldOrExisting("specs"),
     condition: fieldOrExisting("condition"),
     ageYears: fieldOrExisting("ageYears"),
     notes: fieldOrExisting("notes"),
     source: fieldOrExisting("source"),
-    priceCents: input.priceCents,
     estimatedPriceCents: input.estimatedPriceCents,
     typicalUsedPriceCents: input.typicalUsedPriceCents,
     price: input.price,
@@ -432,6 +527,15 @@ function buildInventoryDocument(userId: string, input: MongoInventoryCreateInput
     model: input.model,
     exactModel: input.exactModel,
     catalogProductId: input.catalogProductId,
+    deviceCatalogId: input.deviceCatalogId ?? input.catalogProductId,
+    rawProductTitle: input.rawProductTitle,
+    hasCatalogRatings: input.hasCatalogRatings ?? Boolean(input.catalogProductId),
+    externalId: input.externalId,
+    productUrl: input.productUrl,
+    imageUrl: input.imageUrl,
+    priceCents: input.priceCents,
+    currency: input.currency,
+    productCondition: input.productCondition,
     specs: input.specs ?? null,
     condition: input.condition,
     ageYears: input.ageYears,
@@ -520,6 +624,15 @@ export async function updateInventoryItemForUser(
       model: cleanInput.model,
       exactModel: cleanInput.exactModel,
       catalogProductId: cleanInput.catalogProductId,
+      deviceCatalogId: cleanInput.deviceCatalogId ?? cleanInput.catalogProductId,
+      rawProductTitle: cleanInput.rawProductTitle,
+      hasCatalogRatings: cleanInput.hasCatalogRatings ?? Boolean(cleanInput.catalogProductId),
+      externalId: cleanInput.externalId,
+      productUrl: cleanInput.productUrl,
+      imageUrl: cleanInput.imageUrl,
+      priceCents: cleanInput.priceCents,
+      currency: cleanInput.currency,
+      productCondition: cleanInput.productCondition,
       specs: cleanInput.specs ?? null,
       condition: cleanInput.condition,
       ageYears: cleanInput.ageYears,

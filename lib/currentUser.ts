@@ -46,12 +46,21 @@ export interface InventoryListItem {
   model: string | null;
   exactModel: string | null;
   catalogProductId: string | null;
+  deviceCatalogId: string | null;
+  rawProductTitle: string | null;
+  hasCatalogRatings: boolean;
+  externalId: string | null;
+  productUrl: string | null;
+  imageUrl: string | null;
+  priceCents: number | null;
+  currency: string | null;
+  productCondition: string | null;
   specsJson: string | null;
   specs?: Record<string, unknown>;
   condition: "poor" | "fair" | "good" | "excellent" | "unknown";
   ageYears: number | null;
   notes: string | null;
-  source: "manual" | "photo" | "demo";
+  source: "manual" | "photo" | "demo" | "catalog" | "bestbuy" | "custom";
   displayName: string;
   painPoints: UserProblem[];
 }
@@ -124,13 +133,14 @@ function parseConstraintObject(value: string | null): UserProfile["constraints"]
   };
 }
 
-function buildDisplayName(item: Pick<MongoInventoryItem, "brand" | "model" | "exactModel" | "category">): string {
+function buildDisplayName(item: Pick<MongoInventoryItem, "brand" | "model" | "exactModel" | "category" | "rawProductTitle">): string {
   const base = [item.brand, item.model].filter(Boolean).join(" ").trim();
   if (item.exactModel?.trim()) {
     return base ? `${base} (${item.exactModel.trim()})` : item.exactModel.trim();
   }
 
   if (base) return base;
+  if (item.rawProductTitle?.trim()) return item.rawProductTitle.trim();
   return item.category.replaceAll("_", " ");
 }
 
@@ -149,6 +159,9 @@ function normalizeInventorySource(value: string): InventoryListItem["source"] {
   const normalized = value.toLowerCase();
   if (normalized === "photo") return "photo";
   if (normalized === "demo") return "demo";
+  if (normalized === "catalog") return "catalog";
+  if (normalized === "bestbuy") return "bestbuy";
+  if (normalized === "custom") return "custom";
   return "manual";
 }
 
@@ -165,6 +178,15 @@ function mapInventoryItem(record: MongoInventoryItem): InventoryListItem {
     model: record.model,
     exactModel: record.exactModel,
     catalogProductId: record.catalogProductId,
+    deviceCatalogId: record.deviceCatalogId ?? record.catalogProductId,
+    rawProductTitle: record.rawProductTitle ?? null,
+    hasCatalogRatings: record.hasCatalogRatings ?? Boolean(record.catalogProductId),
+    externalId: record.externalId ?? null,
+    productUrl: record.productUrl ?? null,
+    imageUrl: record.imageUrl ?? null,
+    priceCents: record.priceCents ?? null,
+    currency: record.currency ?? null,
+    productCondition: record.productCondition ?? null,
     specsJson: serialized.specsJson,
     specs: parseSpecs(serialized.specsJson, serialized.specs),
     condition: record.condition.toLowerCase() as InventoryListItem["condition"],

@@ -69,8 +69,13 @@ function itemSpecRaw(item: InventoryItem): Record<string, unknown> {
     category: item.category,
     condition: item.condition,
     painPoints: item.painPoints,
-    ...(item.specs ?? {}),
+    ...(itemHasCatalogRatings(item) ? (item.specs ?? {}) : {}),
   };
+}
+
+function itemHasCatalogRatings(item: InventoryItem): boolean {
+  if (item.source === "bestbuy" || item.source === "custom" || item.hasCatalogRatings === false) return false;
+  return true;
 }
 
 function hasExternalMonitor(inventory: InventoryItem[]): boolean {
@@ -80,26 +85,37 @@ function hasExternalMonitor(inventory: InventoryItem[]): boolean {
 function hasLowRamLaptop(inventory: InventoryItem[]): boolean {
   return inventory.some(
     (item) =>
-      item.category === "laptop" && (normalizeLaptopSpecs(itemSpecRaw(item)).ramGb ?? Number.POSITIVE_INFINITY) <= 8,
+      itemHasCatalogRatings(item) &&
+      item.category === "laptop" &&
+      (normalizeLaptopSpecs(itemSpecRaw(item)).ramGb ?? Number.POSITIVE_INFINITY) <= 8,
   );
 }
 
 function hasBelow1080pMonitor(inventory: InventoryItem[]): boolean {
   return inventory.some(
-    (item) => item.category === "monitor" && normalizeMonitorSpecs(itemSpecRaw(item)).resolutionClass === "below_1080p",
+    (item) =>
+      itemHasCatalogRatings(item) &&
+      item.category === "monitor" &&
+      normalizeMonitorSpecs(itemSpecRaw(item)).resolutionClass === "below_1080p",
   );
 }
 
 function hasNonErgonomicMouse(inventory: InventoryItem[]): boolean {
-  return inventory.some((item) => item.category === "mouse" && normalizeMouseSpecs(itemSpecRaw(item)).ergonomic !== true);
+  return inventory.some(
+    (item) => itemHasCatalogRatings(item) && item.category === "mouse" && normalizeMouseSpecs(itemSpecRaw(item)).ergonomic !== true,
+  );
 }
 
 function hasLoudKeyboard(inventory: InventoryItem[]): boolean {
-  return inventory.some((item) => item.category === "keyboard" && normalizeKeyboardSpecs(itemSpecRaw(item)).loud === true);
+  return inventory.some(
+    (item) => itemHasCatalogRatings(item) && item.category === "keyboard" && normalizeKeyboardSpecs(itemSpecRaw(item)).loud === true,
+  );
 }
 
 function hasChairWithoutLumbar(inventory: InventoryItem[]): boolean {
-  return inventory.some((item) => item.category === "chair" && normalizeChairSpecs(itemSpecRaw(item)).lumbarSupport === false);
+  return inventory.some(
+    (item) => itemHasCatalogRatings(item) && item.category === "chair" && normalizeChairSpecs(itemSpecRaw(item)).lumbarSupport === false,
+  );
 }
 
 function hasDisplayProblem(profile: UserProfile): boolean {

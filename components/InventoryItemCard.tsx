@@ -14,6 +14,9 @@ const sourceLabel: Record<InventoryListItem["source"], string> = {
   manual: "Manual entry",
   photo: "Photo import",
   demo: "Demo scenario",
+  catalog: "Rated catalog",
+  bestbuy: "Best Buy",
+  custom: "Custom entry",
 };
 
 function formatCondition(value: InventoryListItem["condition"]): string {

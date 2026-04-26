@@ -9,6 +9,8 @@ export interface MongoIndexSetupSummary {
     deviceCatalog: string[];
     recommendationLogs: string[];
     priceSnapshots: string[];
+    productSearchCache: string[];
+    catalogEnrichmentCandidates: string[];
     apiUsageEvents: string[];
   };
 }
@@ -55,7 +57,17 @@ async function ensureDeviceCatalogTextIndex(collection: Collection): Promise<str
 export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary> {
   const deviceCatalogCollection = db.collection("device_catalog");
 
-  const [users, userPrivateProfiles, inventoryItems, deviceCatalog, recommendationLogs, priceSnapshots, apiUsageEvents] = await Promise.all([
+  const [
+    users,
+    userPrivateProfiles,
+    inventoryItems,
+    deviceCatalog,
+    recommendationLogs,
+    priceSnapshots,
+    productSearchCache,
+    catalogEnrichmentCandidates,
+    apiUsageEvents,
+  ] = await Promise.all([
     db.collection("users").createIndexes([
       { key: { sourceKey: 1 }, unique: true },
       {
@@ -97,6 +109,16 @@ export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary>
       { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
       { key: { provider: 1, normalizedQuery: 1 } },
     ]),
+    db.collection("product_search_cache").createIndexes([
+      { key: { normalizedQuery: 1 } },
+      { key: { provider: 1, normalizedQuery: 1 } },
+      { key: { expiresAt: 1 } },
+    ]),
+    db.collection("catalog_enrichment_candidates").createIndexes([
+      { key: { normalizedTitle: 1 } },
+      { key: { source: 1, externalId: 1 }, sparse: true },
+      { key: { status: 1, seenCount: -1, lastSeenAt: -1 } },
+    ]),
     db.collection("api_usage_events").createIndexes([
       { key: { provider: 1, createdAt: -1 } },
       { key: { provider: 1, eventType: 1, createdAt: -1 } },
@@ -116,6 +138,8 @@ export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary>
       deviceCatalog: [...deviceCatalog, deviceCatalogTextIndex],
       recommendationLogs,
       priceSnapshots,
+      productSearchCache,
+      catalogEnrichmentCandidates,
       apiUsageEvents,
     },
   };

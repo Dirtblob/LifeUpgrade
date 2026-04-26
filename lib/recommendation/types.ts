@@ -116,6 +116,14 @@ export interface InventoryItem {
   id: string;
   name: string;
   category: InventoryCategory;
+  brand?: string | null;
+  model?: string | null;
+  rawProductTitle?: string | null;
+  source?: "manual" | "photo" | "demo" | "catalog" | "bestbuy" | "custom";
+  priceCents?: number | null;
+  deviceCatalogId?: string | null;
+  catalogProductId?: string | null;
+  hasCatalogRatings?: boolean;
   condition: "poor" | "fair" | "good" | "excellent" | "unknown";
   painPoints: UserProblem[];
   specs?: Record<string, unknown>;

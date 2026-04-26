@@ -13,6 +13,7 @@
     "job:refresh-prices": "tsx scripts/run-refresh-prices.ts",
     "prices:test": "tsx scripts/testPricesApi.ts",
     "prices:debug": "tsx scripts/debugPricesApiRaw.ts",
+    "bestbuy:test": "tsx scripts/testBestBuySearch.ts",
     "db:check": "tsx scripts/checkMongoConnection.ts",
     "db:check-devices": "tsx scripts/checkDeviceCatalog.ts",
     "db:backup": "tsx scripts/backupMongoData.ts",

@@ -1,6 +1,7 @@
 import { ObjectId, type Filter } from "mongodb";
 import { NextResponse } from "next/server";
 import { getMongoDatabase } from "@/lib/mongodb";
+import { searchBestBuyProducts, type BestBuyDiscoveryProduct } from "@/lib/productDiscovery/bestBuyProducts";
 
 interface DeviceCatalogDocument {
   _id: ObjectId | string;
@@ -31,6 +32,8 @@ interface FrontendDeviceOption {
   precomputedTraits: Record<string, unknown> | null;
   ergonomicSpecs: Record<string, unknown> | null;
 }
+
+type FrontendDiscoveryProduct = BestBuyDiscoveryProduct;
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -135,7 +138,18 @@ export async function GET(request: Request): Promise<NextResponse> {
       .map(serializeDevice)
       .filter((device): device is FrontendDeviceOption => Boolean(device));
 
-    return NextResponse.json({ devices });
+    // Best Buy Products API is only for dropdown product discovery. MongoDB device_catalog remains
+    // the rated/recommendable device source used by scoring and recommendation flows.
+    const discoveryProducts: FrontendDiscoveryProduct[] =
+      !id && query
+        ? await searchBestBuyProducts({
+            query,
+            category,
+            limit: Math.min(12, limit),
+          })
+        : [];
+
+    return NextResponse.json({ devices, discoveryProducts });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not load devices.";
     return NextResponse.json({ error: message }, { status: 500 });

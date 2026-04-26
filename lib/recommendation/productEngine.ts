@@ -33,6 +33,7 @@ const FINAL_WEIGHTS = {
 const RECENT_PRICE_WINDOW_MS = 1000 * 60 * 60 * 24;
 
 const genericInventoryPattern = /\b(basic|built[- ]?in|generic|old|screen|laptop|keyboard|mouse|earbuds|unknown)\b/i;
+const unratedInventoryExplanation = "This item is not rated yet, so fit scoring is limited.";
 
 const accessoryCategories = new Set<ProductCategory>([
   "monitor",
@@ -440,10 +441,20 @@ function scoreCompatibilityFit(product: Product, input: RecommendationInput): nu
   return clampScore(score);
 }
 
+function itemHasCatalogRatings(item: InventoryItem | undefined): boolean {
+  if (!item || item.source === "bestbuy" || item.source === "custom" || item.hasCatalogRatings === false) return false;
+  return true;
+}
+
+function hasUnratedSameCategoryInventory(product: Product, inventory: InventoryItem[]): boolean {
+  return inventory.some((item) => item.category === product.category && !itemHasCatalogRatings(item));
+}
+
 function scoreConfidence(product: Product, input: RecommendationInput, missingDeviceSpecs: string[] = []): number {
   const sameCategoryItem = input.inventory.find((item) => item.category === product.category);
   const fitDataPenalty = missingDeviceSpecs.length > 0 ? 12 : 0;
-  const applyPenalty = (score: number) => clampScore(score - fitDataPenalty);
+  const unratedPenalty = sameCategoryItem && !itemHasCatalogRatings(sameCategoryItem) ? 20 : 0;
+  const applyPenalty = (score: number) => clampScore(score - fitDataPenalty - unratedPenalty);
 
   if (input.exactCurrentModelsProvided === true) return applyPenalty(sameCategoryItem ? 90 : 80);
   if (input.exactCurrentModelsProvided === false) return applyPenalty(sameCategoryItem ? 60 : 66);
@@ -466,6 +477,10 @@ function buildReasons(
   const solvedProblems = input.profile.problems.filter((problem) => product.solves.includes(problem));
   const reasons = [...categoryRecommendation.reasons];
   const displayedPriceUsd = Math.round(effectivePriceCents(product, pricing) / 100);
+
+  if (hasUnratedSameCategoryInventory(product, input.inventory)) {
+    reasons.push(unratedInventoryExplanation);
+  }
 
   if (solvedProblems.length > 0) {
     reasons.push(`${product.name} directly targets ${formatProblemList(solvedProblems)}.`);

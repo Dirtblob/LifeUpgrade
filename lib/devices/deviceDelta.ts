@@ -67,6 +67,29 @@ function nestedTraitRatings(specs: Record<string, unknown> | undefined): DeviceT
   );
 }
 
+function inventoryCatalogDeviceId(item: InventoryItem): string | undefined {
+  const specs = item.specs ?? {};
+  const id = item.deviceCatalogId ?? item.catalogProductId ?? specs.catalogDeviceId;
+  return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+}
+
+function hasCatalogRatings(item: InventoryItem): boolean {
+  if (item.source === "bestbuy" || item.source === "custom" || item.hasCatalogRatings === false) return false;
+  return true;
+}
+
+function unratedInventorySpecs(item: InventoryItem): Record<string, unknown> {
+  return {
+    category: item.category,
+    brand: item.brand ?? undefined,
+    model: item.model ?? undefined,
+    rawProductTitle: item.rawProductTitle ?? item.name,
+    source: item.source,
+    priceCents: item.priceCents ?? undefined,
+    condition: item.condition,
+  };
+}
+
 function catalogDeviceFromProduct(product: Product): CatalogDevice {
   const productRecord = product as Product & { features?: Record<string, unknown>; estimatedPriceCents?: number };
 
@@ -133,24 +156,35 @@ function catalogDeviceFromProduct(product: Product): CatalogDevice {
 }
 
 function catalogDeviceFromInventory(item: InventoryItem): CatalogDevice | undefined {
-  const specs = item.specs ?? {};
-  const catalogDeviceId = typeof specs.catalogDeviceId === "string" ? specs.catalogDeviceId : undefined;
-  const matched = findBestDeviceMatch({
-    catalogDeviceId,
-    category: item.category,
-    brand: typeof item.specs?.brand === "string" ? item.specs.brand : undefined,
-    model: item.name,
-    exactModel: item.name,
-    text: item.name,
-  });
+  const catalogDeviceId = inventoryCatalogDeviceId(item);
+
+  const matched = catalogDeviceId
+    ? findBestDeviceMatch({
+        catalogDeviceId,
+        category: item.category,
+        brand: typeof item.specs?.brand === "string" ? item.specs.brand : undefined,
+        model: item.name,
+        exactModel: item.name,
+        text: item.name,
+      })
+    : findBestDeviceMatch({
+        category: item.category,
+        brand: typeof item.specs?.brand === "string" ? item.specs.brand : undefined,
+        model: item.name,
+        exactModel: item.name,
+        text: item.name,
+      });
 
   if (matched) return matched;
+
+  const ratings = nestedTraitRatings(item.specs);
+  if (!ratings) return undefined;
 
   const rawDevice: RawCatalogDevice = {
     id: `inventory-${item.id}`,
     category: deviceCategory(item.category),
-    brand: String(item.specs?.brand ?? item.name.split(" ")[0] ?? "Unknown"),
-    model: item.name,
+    brand: String(item.specs?.brand ?? item.brand ?? item.name.split(" ")[0] ?? "Unknown"),
+    model: item.model ?? item.name,
     displayName: item.name,
     estimatedPriceCents: 0,
     specs: {
@@ -159,8 +193,8 @@ function catalogDeviceFromInventory(item: InventoryItem): CatalogDevice | undefi
       condition: item.condition,
       painPoints: item.painPoints,
     },
-    traitRatings: nestedTraitRatings(item.specs),
-    traitConfidence: nestedTraitRatings(item.specs) ? 0.78 : 0.48,
+    traitRatings: ratings,
+    traitConfidence: 0.78,
   };
 
   return enrichCatalogDevice(rawDevice);
@@ -204,6 +238,16 @@ function traitProfile(value: DeviceLike, category: DeviceCategory): {
   }
 
   if (isInventoryItem(value)) {
+    if (!hasCatalogRatings(value)) {
+      return {
+        label: value.rawProductTitle ?? value.name,
+        traits: getBaselineTraitRatings(category),
+        confidence: 0.28,
+        specs: unratedInventorySpecs(value),
+        missing: false,
+      };
+    }
+
     const device = catalogDeviceFromInventory(value);
     if (device) {
       return {
@@ -344,11 +388,14 @@ export function computeDeviceDelta(
   ];
   const problemSpecificImprovements = strongestImprovements.map(([trait, delta]) => improvementLabel(trait, delta));
   const explanationFacts = [
+    isInventoryItem(currentDevice) && !hasCatalogRatings(currentDevice)
+      ? "This item is not rated yet, so fit scoring is limited."
+      : null,
     current.missing
       ? `Better than your current setup because you do not have a dedicated ${candidateCategory.replaceAll("_", " ")} yet.`
       : `Better than ${current.label}: ${problemSpecificImprovements[0] ?? "overall trait fit improves"}.`,
     ...problemSpecificImprovements.slice(1, 4),
-  ];
+  ].filter((fact): fact is string => Boolean(fact));
   const confidence = clampScore(((candidate.confidence + current.confidence) / 2) * 100);
 
   return {

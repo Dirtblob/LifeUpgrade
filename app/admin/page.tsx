@@ -151,6 +151,9 @@ export default async function AdminDashboardPage() {
               <Link href="/admin/devices" className={buttonLinkClassName()}>
                 Open device intelligence
               </Link>
+              <Link href="/admin/enrichment-candidates" className={buttonLinkClassName()}>
+                Enrichment candidates
+              </Link>
             </div>
           </div>
         </div>

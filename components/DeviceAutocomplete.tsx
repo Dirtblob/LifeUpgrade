@@ -18,22 +18,32 @@ interface DeviceAutocompleteProps {
   defaultSpecsJson?: string | null;
 }
 
-type ApiCatalogDevice = {
-  id: string;
-  slug: string;
-  category: string;
-  subcategory: string | null;
-  brand: string;
-  model: string;
-  variant: string | null;
-  aliases: string[];
-  priceTier: string | null;
-  precomputedTraits: Record<string, unknown> | null;
-  ergonomicSpecs: Record<string, unknown> | null;
+type ProductSearchSource = "catalog" | "bestbuy" | "custom";
+
+type ApiProductSearchResult = {
+  id?: string;
+  deviceCatalogId?: string;
+  source: ProductSearchSource;
+  externalId?: string;
+  title: string;
+  brand?: string;
+  model?: string;
+  category?: string;
+  imageUrl?: string;
+  priceCents?: number;
+  currency?: string;
+  condition?: string;
+  productUrl?: string;
+  hasCatalogRatings: boolean;
+  precomputedTraits?: Record<string, unknown>;
+  ergonomicSpecs?: Record<string, unknown>;
 };
 
-interface DevicesApiResponse {
-  devices?: ApiCatalogDevice[];
+interface ProductSearchApiResponse {
+  query: string;
+  results?: ApiProductSearchResult[];
+  providersUsed?: string[];
+  cacheStatus?: "fresh" | "stale" | "miss" | "mixed";
   error?: string;
 }
 
@@ -54,12 +64,41 @@ function formatSpecValue(value: unknown): string {
   return String(value);
 }
 
-function deviceLabel(device: ApiCatalogDevice): string {
-  return [device.brand, device.model, device.variant].filter(Boolean).join(" ");
+function resultLabel(result: ApiProductSearchResult): string {
+  if (result.source === "custom") return "Add custom device";
+  if (result.hasCatalogRatings) return "Rated";
+  if (result.source === "bestbuy") return "Best Buy — not rated";
+  return "Not rated";
 }
 
-function traitRatings(device: ApiCatalogDevice): Record<string, number> {
-  const source = device.precomputedTraits;
+function sourceLabel(result: ApiProductSearchResult): string {
+  if (result.source === "catalog") return "Rated catalog";
+  if (result.source === "bestbuy") return "Best Buy";
+  return "Custom entry";
+}
+
+function formatPrice(result: ApiProductSearchResult): string | null {
+  if (typeof result.priceCents !== "number" || !Number.isFinite(result.priceCents)) return null;
+  const currency = result.currency ?? "USD";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(result.priceCents / 100);
+}
+
+function resultDetails(result: ApiProductSearchResult): string {
+  return [
+    sourceLabel(result),
+    result.category?.replaceAll("_", " "),
+    result.condition,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function traitRatings(result?: ApiProductSearchResult): Record<string, number> {
+  const source = result?.precomputedTraits;
   const nested =
     source && typeof source.traitRatings === "object" && source.traitRatings && !Array.isArray(source.traitRatings)
       ? (source.traitRatings as Record<string, unknown>)
@@ -70,39 +109,46 @@ function traitRatings(device: ApiCatalogDevice): Record<string, number> {
   ) as Record<string, number>;
 }
 
-function topTraitBadges(device: ApiCatalogDevice, limit = 4): string[] {
-  return Object.entries(traitRatings(device))
+function topTraitBadges(result: ApiProductSearchResult, limit = 4): string[] {
+  return Object.entries(traitRatings(result))
     .sort((left, right) => Number(right[1]) - Number(left[1]) || left[0].localeCompare(right[0]))
     .slice(0, limit)
     .map(([key, value]) => `${humanizeKey(key)} ${Math.round(value)}`);
 }
 
-function deviceDetails(device: ApiCatalogDevice): string {
-  return [
-    device.category.replaceAll("_", " "),
-    device.subcategory?.replaceAll("_", " "),
-    device.priceTier,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function specsJson(device?: ApiCatalogDevice): string {
-  return device
+function specsJson(result?: ApiProductSearchResult): string {
+  return result?.hasCatalogRatings
     ? JSON.stringify({
-        catalogDeviceId: device.id,
-        slug: device.slug,
-        category: device.category,
-        subcategory: device.subcategory,
-        brand: device.brand,
-        model: device.model,
-        variant: device.variant,
-        aliases: device.aliases,
-        priceTier: device.priceTier,
-        precomputedTraits: device.precomputedTraits,
-        ergonomicSpecs: device.ergonomicSpecs,
+        catalogDeviceId: result.deviceCatalogId,
+        category: result.category,
+        brand: result.brand,
+        model: result.model,
+        precomputedTraits: result.precomputedTraits,
+        ergonomicSpecs: result.ergonomicSpecs,
       })
     : "";
+}
+
+function groupResults(results: ApiProductSearchResult[]): Record<ProductSearchSource, ApiProductSearchResult[]> {
+  return {
+    catalog: results.filter((result) => result.source === "catalog"),
+    bestbuy: results.filter((result) => result.source === "bestbuy"),
+    custom: results.filter((result) => result.source === "custom"),
+  };
+}
+
+function parseBrandModel(result: ApiProductSearchResult): { brand: string; model: string } {
+  if (result.brand || result.model) {
+    return {
+      brand: result.brand ?? "",
+      model: result.model ?? result.title,
+    };
+  }
+
+  return {
+    brand: "",
+    model: result.title,
+  };
 }
 
 export function DeviceAutocomplete({
@@ -119,60 +165,29 @@ export function DeviceAutocomplete({
   const [brand, setBrand] = useState(defaultBrand ?? "");
   const [model, setModel] = useState(defaultModel ?? "");
   const [exactModel, setExactModel] = useState(defaultExactModel ?? "");
-  const [selectedDevice, setSelectedDevice] = useState<ApiCatalogDevice | undefined>();
+  const [selectedResult, setSelectedResult] = useState<ApiProductSearchResult | undefined>();
   const [catalogProductId, setCatalogProductId] = useState(defaultCatalogProductId ?? "");
-  const [results, setResults] = useState<ApiCatalogDevice[]>([]);
+  const [results, setResults] = useState<ApiProductSearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [manualMode, setManualMode] = useState(!defaultCatalogProductId && Boolean(defaultBrand || defaultModel));
 
-  const importedSpecsJson = selectedDevice ? specsJson(selectedDevice) : (defaultSpecsJson ?? "");
+  const importedSpecsJson = selectedResult?.hasCatalogRatings ? specsJson(selectedResult) : (defaultSpecsJson ?? "");
   const submittedSpecsJson = catalogProductId ? importedSpecsJson : "";
   const importedSpecEntries: Array<[string, unknown]> = [];
-  if (selectedDevice) {
+  if (selectedResult?.hasCatalogRatings) {
     const rawEntries: Array<[string, unknown]> = [
-      ["Category", selectedDevice.category.replaceAll("_", " ")],
-      ["Subcategory", selectedDevice.subcategory?.replaceAll("_", " ") ?? null],
-      ["Variant", selectedDevice.variant],
-      ["Price tier", selectedDevice.priceTier],
-      ["Aliases", selectedDevice.aliases.length > 0 ? selectedDevice.aliases.slice(0, 3).join(", ") : null],
+      ["Category", selectedResult.category?.replaceAll("_", " ") ?? null],
+      ["Brand", selectedResult.brand],
+      ["Model", selectedResult.model],
+      ["Price", formatPrice(selectedResult)],
     ];
 
     importedSpecEntries.push(
       ...rawEntries.filter((entry) => entry[1] !== undefined && entry[1] !== null && entry[1] !== ""),
     );
   }
-
-  useEffect(() => {
-    if (!defaultCatalogProductId) return;
-
-    const controller = new AbortController();
-    const params = new URLSearchParams({ id: defaultCatalogProductId, limit: "1" });
-
-    fetch(`/api/devices?${params.toString()}`, { signal: controller.signal })
-      .then(async (response) => {
-        const payload = (await response.json()) as DevicesApiResponse;
-        if (!response.ok) throw new Error(payload.error ?? "Could not load selected device.");
-        return payload.devices?.[0];
-      })
-      .then((device) => {
-        if (!device) return;
-        setSelectedDevice(device);
-        setCatalogProductId(device.id);
-        setQuery(deviceLabel(device));
-        setBrand(device.brand);
-        setModel(device.model);
-        setExactModel(defaultExactModel ?? deviceLabel(device));
-        setCategory(device.category);
-        setManualMode(false);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-      });
-
-    return () => controller.abort();
-  }, [defaultCatalogProductId, defaultExactModel]);
 
   useEffect(() => {
     const trimmedQuery = query.trim();
@@ -188,50 +203,53 @@ export function DeviceAutocomplete({
     const timeout = window.setTimeout(() => {
       const params = new URLSearchParams({
         q: trimmedQuery,
-        category,
-        limit: "50",
       });
 
       setIsLoading(true);
       setErrorMessage(null);
 
-      fetch(`/api/devices?${params.toString()}`, { signal: controller.signal })
+      fetch(`/api/product-search?${params.toString()}`, { signal: controller.signal })
         .then(async (response) => {
-          const payload = (await response.json()) as DevicesApiResponse;
-          if (!response.ok) throw new Error(payload.error ?? "Could not search devices.");
-          return payload.devices ?? [];
+          const payload = (await response.json()) as ProductSearchApiResponse;
+          if (!response.ok) throw new Error(payload.error ?? "Could not search products.");
+          return payload;
         })
-        .then((devices) => setResults(devices))
+        .then((payload) => {
+          setResults(payload.results ?? []);
+        })
         .catch((error: unknown) => {
           if (error instanceof DOMException && error.name === "AbortError") return;
           setResults([]);
-          setErrorMessage(error instanceof Error ? error.message : "Could not search devices.");
+          setErrorMessage(error instanceof Error ? error.message : "Could not search products.");
         })
         .finally(() => {
           if (!controller.signal.aborted) setIsLoading(false);
         });
-    }, 180);
+    }, 300);
 
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [category, query]);
+  }, [query]);
 
-  function selectDevice(device: ApiCatalogDevice): void {
-    setSelectedDevice(device);
-    setCatalogProductId(device.id);
-    setManualMode(false);
-    setQuery(deviceLabel(device));
-    setBrand(device.brand);
-    setModel(device.model);
-    setExactModel(deviceLabel(device));
-    setCategory(device.category);
+  function selectResult(result: ApiProductSearchResult): void {
+    const parsed = parseBrandModel(result);
+    const isRated = result.hasCatalogRatings && Boolean(result.deviceCatalogId);
+
+    setSelectedResult(result);
+    setCatalogProductId(isRated ? (result.deviceCatalogId ?? "") : "");
+    setManualMode(!isRated);
+    setQuery(result.title);
+    setBrand(parsed.brand);
+    setModel(parsed.model);
+    setExactModel(result.title);
+    if (isRated && result.category) setCategory(result.category);
     setIsOpen(false);
   }
 
   function clearImportedDevice(): void {
-    setSelectedDevice(undefined);
+    setSelectedResult(undefined);
     setCatalogProductId("");
   }
 
@@ -239,7 +257,72 @@ export function DeviceAutocomplete({
     clearImportedDevice();
     setManualMode(true);
     setIsOpen(false);
-    if (!brand && query.trim()) setModel(query.trim());
+    if (!model && query.trim()) setModel(query.trim());
+    if (query.trim()) setExactModel(query.trim());
+  }
+
+  const groupedResults = groupResults(results);
+  const hasOnlyCustomResults =
+    groupedResults.catalog.length === 0 && groupedResults.bestbuy.length === 0 && groupedResults.custom.length > 0;
+  const selectedSource = selectedResult?.source ?? (catalogProductId ? "catalog" : "custom");
+  const selectedHasCatalogRatings = Boolean(selectedResult?.hasCatalogRatings || catalogProductId);
+  const selectedRawProductTitle = selectedResult?.title ?? (exactModel || query);
+  const selectedCondition = selectedResult?.condition ?? "";
+
+  function renderResult(result: ApiProductSearchResult) {
+    const badges = topTraitBadges(result, 3);
+    const price = formatPrice(result);
+
+    return (
+      <button
+        key={`${result.source}:${result.deviceCatalogId ?? result.externalId ?? result.title}`}
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => selectResult(result)}
+        className="flex w-full gap-3 border-b border-ink/8 px-4 py-3 text-left transition last:border-b-0 hover:bg-mist"
+      >
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-mist text-[11px] font-semibold text-ink/45">
+          {result.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={result.imageUrl} alt="" className="h-full w-full object-cover" />
+          ) : (
+            sourceLabel(result).slice(0, 2)
+          )}
+        </div>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-ink">{result.title}</span>
+            <span className="rounded-full bg-mist px-2 py-0.5 text-[11px] font-semibold text-ink/55">
+              {resultLabel(result)}
+            </span>
+          </span>
+          <span className="mt-1 block text-xs text-ink/55">{resultDetails(result) || sourceLabel(result)}</span>
+          {price ? <span className="mt-1 block text-xs font-semibold text-moss">{price}</span> : null}
+          {badges.length > 0 ? (
+            <span className="mt-2 flex flex-wrap gap-1.5">
+              {badges.map((badge) => (
+                <span key={badge} className="rounded-full bg-mist px-2 py-1 text-[11px] font-semibold text-ink/58">
+                  {badge}
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </span>
+      </button>
+    );
+  }
+
+  function renderGroup(title: string, groupResults: ApiProductSearchResult[]) {
+    if (groupResults.length === 0) return null;
+
+    return (
+      <>
+        <div className="border-b border-ink/8 bg-mist/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/48">
+          {title}
+        </div>
+        {groupResults.map(renderResult)}
+      </>
+    );
   }
 
   return (
@@ -289,29 +372,20 @@ export function DeviceAutocomplete({
               ) : errorMessage ? (
                 <div className="px-4 py-3 text-sm font-medium text-clay">{errorMessage}</div>
               ) : results.length === 0 ? (
-                <div className="px-4 py-3 text-sm font-medium text-ink/58">No matching devices found in the catalog.</div>
+                <div className="px-4 py-3 text-sm font-medium text-ink/58">
+                  No matching devices found. You can still add this as a custom device.
+                </div>
               ) : (
-                results.map((device) => (
-                  <button
-                    key={device.id}
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => selectDevice(device)}
-                    className="block w-full border-b border-ink/8 px-4 py-3 text-left transition last:border-b-0 hover:bg-mist"
-                  >
-                    <span className="block text-sm font-semibold text-ink">{deviceLabel(device)}</span>
-                    <span className="mt-1 block text-xs text-ink/55">
-                      {deviceDetails(device)}
-                    </span>
-                    <span className="mt-2 flex flex-wrap gap-1.5">
-                      {topTraitBadges(device, 3).map((badge) => (
-                        <span key={badge} className="rounded-full bg-mist px-2 py-1 text-[11px] font-semibold text-ink/58">
-                          {badge}
-                        </span>
-                      ))}
-                    </span>
-                  </button>
-                ))
+                <>
+                  {hasOnlyCustomResults ? (
+                    <div className="px-4 py-3 text-sm font-medium text-ink/58">
+                      No rated catalog or Best Buy matches. You can add this as a custom device.
+                    </div>
+                  ) : null}
+                  {renderGroup("Rated catalog", groupedResults.catalog)}
+                  {renderGroup("Best Buy products", groupedResults.bestbuy)}
+                  {renderGroup("Custom entry", groupedResults.custom)}
+                </>
               )}
             </div>
           ) : null}
@@ -363,8 +437,17 @@ export function DeviceAutocomplete({
 
       <input type="hidden" name="catalogProductId" value={catalogProductId} />
       <input type="hidden" name="specsJson" value={submittedSpecsJson} />
+      <input type="hidden" name="productSearchSource" value={selectedSource} />
+      <input type="hidden" name="rawProductTitle" value={selectedRawProductTitle} />
+      <input type="hidden" name="hasCatalogRatings" value={String(selectedHasCatalogRatings)} />
+      <input type="hidden" name="externalId" value={selectedResult?.externalId ?? ""} />
+      <input type="hidden" name="productUrl" value={selectedResult?.productUrl ?? ""} />
+      <input type="hidden" name="imageUrl" value={selectedResult?.imageUrl ?? ""} />
+      <input type="hidden" name="priceCents" value={selectedResult?.priceCents ?? ""} />
+      <input type="hidden" name="currency" value={selectedResult?.currency ?? ""} />
+      <input type="hidden" name="productCondition" value={selectedCondition} />
 
-      {!selectedDevice ? (
+      {!selectedResult ? (
         <button
           type="button"
           onClick={switchToManualEntry}
@@ -374,24 +457,28 @@ export function DeviceAutocomplete({
         </button>
       ) : null}
 
-      {manualMode && !selectedDevice ? (
+      {selectedResult && !selectedResult.hasCatalogRatings ? (
+        <div className="rounded-[1.4rem] border border-dashed border-gold/30 bg-gold/8 p-4 text-sm leading-6 text-ink/62">
+          {resultLabel(selectedResult)} filled the manual fields. This will save as a custom, unrated inventory item.
+        </div>
+      ) : manualMode && !selectedResult ? (
         <div className="rounded-[1.4rem] border border-dashed border-ink/14 bg-white p-4 text-sm leading-6 text-ink/62">
           Manual entry will still be scored, but exact device selection unlocks normalized specs, trait deltas, and better
           explanations.
         </div>
       ) : null}
 
-      {selectedDevice ? (
+      {selectedResult?.hasCatalogRatings ? (
         <div className="rounded-[1.4rem] border border-moss/18 bg-[#f3f8f4] p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-sm font-semibold text-moss">Device intelligence imported</p>
               <p className="mt-1 text-xs text-ink/52">
-                {deviceDetails(selectedDevice) || "Catalog match selected"} · slug {selectedDevice.slug}
+                {resultDetails(selectedResult) || "Catalog match selected"}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              {topTraitBadges(selectedDevice, 4).map((badge) => (
+              {topTraitBadges(selectedResult, 4).map((badge) => (
                 <span key={badge} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink/62">
                   {badge}
                 </span>
@@ -406,7 +493,7 @@ export function DeviceAutocomplete({
                 </span>
               ))}
             </div>
-            <DeviceTraitBars ratings={traitRatings(selectedDevice)} compact />
+            <DeviceTraitBars ratings={traitRatings(selectedResult)} compact />
           </div>
         </div>
       ) : null}
