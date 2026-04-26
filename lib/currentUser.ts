@@ -1,6 +1,6 @@
 import type { UserProfile as PrismaUserProfile } from "@prisma/client";
 import { db } from "@/lib/db";
-import { getCurrentMongoUser } from "@/lib/devUser";
+import { DEV_USER_ID, getCurrentMongoUser } from "@/lib/devUser";
 import { listInventoryItemsForUser, serializeInventoryItem, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import { parseProfileMetadata } from "@/lib/profileMetadata";
 import { hackathonDemoProfile, serializeHackathonDemoProfile } from "@/lib/recommendation/demoMode";
@@ -11,7 +11,7 @@ import {
   normalizeUserPreferences,
   normalizeUserProblems,
 } from "@/lib/recommendation/types";
-import { getCurrentUserPrivateProfile, type UserPrivateProfile } from "@/lib/userPrivateProfiles";
+import { getUserPrivateProfileForUser, type UserPrivateProfile } from "@/lib/userPrivateProfiles";
 
 const CURRENT_USER_ID = hackathonDemoProfile.id;
 
@@ -233,6 +233,33 @@ function mapPrivateProfile(profile: UserPrivateProfile | null): PrivateRecommend
   };
 }
 
+async function loadMongoUserContext(): Promise<{
+  userId: string;
+  inventoryRecords: MongoInventoryItem[];
+  privateProfileRecord: UserPrivateProfile | null;
+}> {
+  try {
+    const mongoUser = await getCurrentMongoUser();
+    const [inventoryRecords, privateProfileRecord] = await Promise.all([
+      listInventoryItemsForUser(mongoUser.id),
+      getUserPrivateProfileForUser(mongoUser.id),
+    ]);
+
+    return {
+      userId: mongoUser.id,
+      inventoryRecords,
+      privateProfileRecord,
+    };
+  } catch (error) {
+    console.warn("Falling back to empty inventory context.", error);
+    return {
+      userId: DEV_USER_ID,
+      inventoryRecords: [],
+      privateProfileRecord: null,
+    };
+  }
+}
+
 export async function ensureCurrentUserProfile(): Promise<PrismaUserProfile> {
   return db.userProfile.upsert({
     where: { id: CURRENT_USER_ID },
@@ -242,17 +269,20 @@ export async function ensureCurrentUserProfile(): Promise<PrismaUserProfile> {
 }
 
 export async function getCurrentUserContext(): Promise<CurrentUserContext | null> {
-  const profileRecord = await db.userProfile.findUnique({
-    where: { id: CURRENT_USER_ID },
-  });
+  let profileRecord: PrismaUserProfile | null;
+
+  try {
+    profileRecord = await db.userProfile.findUnique({
+      where: { id: CURRENT_USER_ID },
+    });
+  } catch (error) {
+    console.warn("Unable to load the active profile.", error);
+    return null;
+  }
 
   if (!profileRecord) return null;
 
-  const mongoUser = await getCurrentMongoUser();
-  const [inventoryRecords, privateProfileRecord] = await Promise.all([
-    listInventoryItemsForUser(mongoUser.id),
-    getCurrentUserPrivateProfile(),
-  ]);
+  const { userId, inventoryRecords, privateProfileRecord } = await loadMongoUserContext();
 
   const profile = mapUserProfile(profileRecord);
   const metadata = parseProfileMetadata(profileRecord.roomConstraints);
@@ -266,7 +296,7 @@ export async function getCurrentUserContext(): Promise<CurrentUserContext | null
       : metadata.deviceType;
 
   return {
-    userId: mongoUser.id,
+    userId,
     profileRecord,
     inventoryRecords,
     profile,

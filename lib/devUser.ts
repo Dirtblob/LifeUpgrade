@@ -60,8 +60,17 @@ function getEmailAddress(input: {
 }
 
 async function getOptionalClerkUserId(): Promise<string | null> {
-  const { userId } = await auth();
-  return userId ?? null;
+  try {
+    const { userId } = await auth();
+    return userId ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!message.includes("can't detect usage of clerkMiddleware")) {
+      console.warn("Falling back to local demo auth.", error);
+    }
+
+    return null;
+  }
 }
 
 export async function getCurrentInventoryUserId(): Promise<string> {

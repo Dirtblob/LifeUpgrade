@@ -1,4 +1,5 @@
 import type { SavedProduct, UserProfile as PrismaUserProfile } from "@prisma/client";
+import { productCatalog } from "@/data/seeds/productCatalog";
 import { getCachedAvailabilitySummaries, type AvailabilityProductModel, type AvailabilitySummary } from "@/lib/availability";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
 import { db } from "@/lib/db";
@@ -18,7 +19,7 @@ import {
   type UserProblem,
   type UserProfile,
 } from "@/lib/recommendation/types";
-import { getCurrentUserPrivateProfileForRecommendations, type UserPrivateProfile } from "@/lib/userPrivateProfiles";
+import { getUserPrivateProfileForRecommendationsForUser, type UserPrivateProfile } from "@/lib/userPrivateProfiles";
 
 interface LoadedRecommendationContext {
   profileId: string;
@@ -158,6 +159,64 @@ function buildCheckingSummary(productModelId: string): AvailabilitySummary {
   };
 }
 
+async function loadRecommendationProducts(): Promise<Product[]> {
+  try {
+    const products = await loadMongoRecommendationProducts();
+    return products.length > 0 ? products : productCatalog;
+  } catch (error) {
+    console.warn("Falling back to static product catalog for recommendations.", error);
+    return productCatalog;
+  }
+}
+
+async function loadMongoRecommendationUserData(): Promise<{
+  inventoryRecords: MongoInventoryItem[];
+  privateProfileRecord: UserPrivateProfile | null;
+}> {
+  try {
+    const mongoUser = await getCurrentMongoUser();
+    const [inventoryRecords, privateProfileRecord] = await Promise.all([
+      listInventoryItemsForUser(mongoUser.id),
+      getUserPrivateProfileForRecommendationsForUser(mongoUser.id),
+    ]);
+
+    return {
+      inventoryRecords,
+      privateProfileRecord,
+    };
+  } catch (error) {
+    console.warn("Falling back to empty recommendation inventory.", error);
+    return {
+      inventoryRecords: [],
+      privateProfileRecord: null,
+    };
+  }
+}
+
+async function loadSeededAvailability(
+  availabilityProductModels: AvailabilityProductModel[],
+): Promise<Record<string, AvailabilitySummary>> {
+  try {
+    return await getCachedAvailabilitySummaries(availabilityProductModels);
+  } catch (error) {
+    console.warn("Falling back to checking availability state.", error);
+    return Object.fromEntries(
+      availabilityProductModels.map((productModel) => [productModel.id, buildCheckingSummary(productModel.id)]),
+    );
+  }
+}
+
+async function loadSeededPricing(
+  availabilityProductModels: AvailabilityProductModel[],
+): Promise<Record<string, RecommendationPriceSnapshot>> {
+  try {
+    return await loadCachedRecommendationPriceSnapshots(availabilityProductModels);
+  } catch (error) {
+    console.warn("Falling back to empty recommendation pricing cache.", error);
+    return {};
+  }
+}
+
 async function loadRecommendationContextForProfile(
   activeProfile: RecommendationContextProfileRecord | null,
 ): Promise<LoadedRecommendationContext | null> {
@@ -165,11 +224,7 @@ async function loadRecommendationContextForProfile(
 
   const metadata = parseProfileMetadata(activeProfile.roomConstraints);
   const rawConstraints = metadata.rawConstraints;
-  const mongoUser = await getCurrentMongoUser();
-  const [inventoryRecords, privateProfileRecord] = await Promise.all([
-    listInventoryItemsForUser(mongoUser.id),
-    getCurrentUserPrivateProfileForRecommendations(),
-  ]);
+  const { inventoryRecords, privateProfileRecord } = await loadMongoRecommendationUserData();
   const inventory = inventoryRecords.map(mapInventoryItem);
   const privateProfile = mapPrivateProfile(privateProfileRecord);
   const profile: UserProfile = {
@@ -192,13 +247,13 @@ async function loadRecommendationContextForProfile(
   };
 
   const savedProductIds = new Set(activeProfile.savedProducts.map((item) => canonicalizeProductId(item.productModelId)));
-  const candidateProducts = await loadMongoRecommendationProducts();
+  const candidateProducts = await loadRecommendationProducts();
   const availabilityProductModels: AvailabilityProductModel[] = candidateProducts.map((product) =>
     recommendationProductToAvailabilityModel(product, { allowUsed: activeProfile.usedItemsOkay }),
   );
   const [seededAvailability, seededPricing] = await Promise.all([
-    getCachedAvailabilitySummaries(availabilityProductModels),
-    loadCachedRecommendationPriceSnapshots(availabilityProductModels),
+    loadSeededAvailability(availabilityProductModels),
+    loadSeededPricing(availabilityProductModels),
   ]);
   const availabilityByProductId = new Map<string, AvailabilitySummary>(
     Object.entries(seededAvailability).map(([productId, summary]) => [canonicalizeProductId(productId), summary]),
@@ -231,15 +286,22 @@ async function loadRecommendationContextForProfile(
 }
 
 export async function loadRecommendationContext(): Promise<LoadedRecommendationContext | null> {
-  const activeProfile =
-    (await db.userProfile.findUnique({
-      where: { id: "demo-profile" },
-      include: { savedProducts: true },
-    })) ??
-    (await db.userProfile.findFirst({
-      include: { savedProducts: true },
-      orderBy: { createdAt: "desc" },
-    }));
+  let activeProfile: RecommendationContextProfileRecord | null;
+
+  try {
+    activeProfile =
+      (await db.userProfile.findUnique({
+        where: { id: "demo-profile" },
+        include: { savedProducts: true },
+      })) ??
+      (await db.userProfile.findFirst({
+        include: { savedProducts: true },
+        orderBy: { createdAt: "desc" },
+      }));
+  } catch (error) {
+    console.warn("Unable to load recommendation profile.", error);
+    return null;
+  }
 
   return loadRecommendationContextForProfile(activeProfile);
 }
