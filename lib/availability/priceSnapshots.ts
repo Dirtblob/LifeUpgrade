@@ -32,7 +32,7 @@ export interface PriceSnapshotDocument {
   slug?: string;
   query: string;
   normalizedQuery: string;
-  provider: "pricesapi";
+  provider: string;
   bestOffer: PriceSnapshotOffer | null;
   offers: PriceSnapshotOffer[];
   offerCount: number;
@@ -47,6 +47,7 @@ export interface PriceSnapshotDocument {
 interface LookupPriceSnapshotInput {
   slug?: string;
   normalizedQueries: string[];
+  provider?: string;
 }
 
 interface WritePriceSnapshotInput {
@@ -58,6 +59,7 @@ interface WritePriceSnapshotInput {
   fetchedAt: Date;
   error?: string;
   ttlMs?: number;
+  provider?: string;
 }
 
 function normalizeText(value: string | undefined | null): string | undefined {
@@ -164,10 +166,13 @@ function buildPriceSnapshotFilter(input: LookupPriceSnapshotInput): Filter<Price
     return null;
   }
 
-  return {
-    provider: PRICES_API_PROVIDER,
-    $or: orFilters,
-  };
+  const filter: Filter<PriceSnapshotDocument> = { $or: orFilters };
+  const provider = normalizeText(input.provider);
+  if (provider) {
+    filter.provider = provider;
+  }
+
+  return filter;
 }
 
 function newerSnapshot(left: PriceSnapshotDocument, right: PriceSnapshotDocument): PriceSnapshotDocument {
@@ -318,10 +323,7 @@ export async function loadCachedRecommendationPriceSnapshots(
   const collection = await getPriceSnapshotCollection();
   const snapshots = await collection
     .find(
-      {
-        provider: PRICES_API_PROVIDER,
-        $or: orFilters,
-      },
+      { $or: orFilters },
       {
         projection: {
           _id: 1,
@@ -399,9 +401,11 @@ export async function writePriceSnapshot(input: WritePriceSnapshotInput): Promis
   const slug = normalizeText(input.slug);
   const deviceCatalogId = normalizeText(input.deviceCatalogId);
 
+  const provider = input.provider ?? PRICES_API_PROVIDER;
+
   await collection.updateOne(
     {
-      provider: PRICES_API_PROVIDER,
+      provider,
       normalizedQuery: input.normalizedQuery,
     },
     {
@@ -410,7 +414,7 @@ export async function writePriceSnapshot(input: WritePriceSnapshotInput): Promis
         slug,
         query: input.query,
         normalizedQuery: input.normalizedQuery,
-        provider: PRICES_API_PROVIDER,
+        provider,
         bestOffer,
         offers,
         offerCount: offers.length,

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { currentUser } from "@clerk/nextjs/server";
 import { runLaptopOnlyStudentDemoAction } from "@/app/actions";
 import { ProductCard } from "@/components/ProductCard";
 import { RecommendationCard } from "@/components/RecommendationCard";
@@ -9,7 +10,7 @@ import { getCachedAvailabilitySummaries, type AvailabilityProductModel, type Ava
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
 import { buildRecommendationNarrationId } from "@/lib/llm/explanationCache";
 import { readCachedRecommendationNarrations } from "@/lib/llm/recommendationNarrator";
-import { loadMongoRecommendationProducts, recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
 import {
   buildHackathonDemoPriorityList,
   buildHackathonDemoRecommendationInput,
@@ -23,8 +24,7 @@ export const dynamic = "force-dynamic";
 
 async function loadDemoProducts(): Promise<Product[]> {
   try {
-    const products = await loadMongoRecommendationProducts();
-    return products.length > 0 ? products : productCatalog;
+    return productCatalog;
   } catch (error) {
     console.warn("Falling back to static product catalog for landing page.", error);
     return productCatalog;
@@ -34,7 +34,7 @@ async function loadDemoProducts(): Promise<Product[]> {
 async function loadDemoAvailability(
   availabilityModels: AvailabilityProductModel[],
 ): Promise<Record<string, AvailabilitySummary>> {
-  if (!process.env.DATABASE_URL?.trim()) {
+  if (!process.env.MONGODB_URI?.trim()) {
     return {};
   }
 
@@ -64,7 +64,7 @@ async function loadDemoPricing(
 async function loadDemoNarrations(
   entries: Parameters<typeof readCachedRecommendationNarrations>[0],
 ): Promise<Awaited<ReturnType<typeof readCachedRecommendationNarrations>>> {
-  if (!process.env.DATABASE_URL?.trim()) {
+  if (!process.env.MONGODB_URI?.trim()) {
     return [];
   }
 
@@ -76,8 +76,24 @@ async function loadDemoNarrations(
   }
 }
 
+async function getLoggedInDisplayName(): Promise<string | null> {
+  try {
+    const user = await currentUser();
+    const fullName = user?.fullName?.trim();
+    if (fullName) return fullName;
+
+    const firstLast = [user?.firstName?.trim(), user?.lastName?.trim()].filter(Boolean).join(" ").trim();
+    if (firstLast) return firstLast;
+
+    return user?.username?.trim() || user?.primaryEmailAddress?.emailAddress?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function HomePage() {
-  const candidateProducts = await loadDemoProducts();
+  const [candidateProducts, loggedInDisplayName] = await Promise.all([loadDemoProducts(), getLoggedInDisplayName()]);
+  const demoProfileName = loggedInDisplayName ?? hackathonDemoProfile.name;
   const previewProducts = candidateProducts.slice(0, 3);
   const availabilityModels = candidateProducts.map((product) => recommendationProductToAvailabilityModel(product, { allowUsed: true }));
   const [cachedAvailabilityByProductId, pricingByProductId] = await Promise.all([
@@ -85,8 +101,13 @@ export default async function HomePage() {
     loadDemoPricing(availabilityModels),
   ]);
   const availabilityByProductId = cachedAvailabilityByProductId;
+  const baseDemoInput = buildHackathonDemoRecommendationInput();
   const demoInput = {
-    ...buildHackathonDemoRecommendationInput(),
+    ...baseDemoInput,
+    profile: {
+      ...baseDemoInput.profile,
+      name: demoProfileName,
+    },
     candidateProducts,
     availabilityByProductId,
     pricingByProductId,
@@ -173,7 +194,7 @@ export default async function HomePage() {
               <div className="mb-5 flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm text-white/60">Demo profile</p>
-                  <h2 className="mt-1 font-display text-3xl font-semibold">{hackathonDemoProfile.name}</h2>
+                  <h2 className="mt-1 font-display text-3xl font-semibold">{demoProfileName}</h2>
                   <p className="mt-2 text-sm leading-6 text-white/68">
                     Computer science student, laptop-only setup, eye strain and neck pain, one-time budget.
                   </p>

@@ -24,8 +24,13 @@ export function RecommendationCard({ recommendation, availability, narration, na
   const { product } = recommendation;
   const summary = product.strengths.slice(0, 2).join(", ");
   const displayedPrice =
-    recommendation.currentBestPriceCents === null ? formatUsd(product.priceUsd) : formatUsdFromCents(recommendation.currentBestPriceCents);
-  const livePriceState = buildLivePriceCardState(availability, Math.round(product.priceUsd * 100));
+    recommendation.currentBestPriceCents != null
+      ? formatUsdFromCents(recommendation.currentBestPriceCents)
+      : product.priceUsd > 0
+        ? formatUsd(product.priceUsd)
+        : "Price TBD";
+  const catalogCents = product.priceUsd > 0 ? Math.round(product.priceUsd * 100) : null;
+  const livePriceState = buildLivePriceCardState(availability, catalogCents);
   const betterThanCurrentRow = recommendation.deviceDelta?.explanationFacts[0]
     ? (["Why this is better", recommendation.deviceDelta.explanationFacts[0]] satisfies [string, string])
     : null;
@@ -57,7 +62,7 @@ export function RecommendationCard({ recommendation, availability, narration, na
           </p>
           <h2 className="mt-2 font-display text-2xl font-semibold text-white">{product.name}</h2>
           <p className="mt-1 text-sm font-medium text-slate-400">
-            {product.brand} · {displayedPrice} · {availability?.label ?? "Checking not configured"}
+            {product.brand} · {displayedPrice} · {availability?.label ?? "Availability unknown"}
           </p>
         </div>
         <ScoreBadge score={recommendation.score} size="md" />

@@ -1,7 +1,6 @@
-import type { UserProfile as PrismaUserProfile } from "@prisma/client";
 import { productCatalog } from "@/data/seeds/productCatalog";
 import type { AvailabilitySummary } from "@/lib/availability";
-import { db } from "@/lib/db";
+import { db, type UserProfileRecord } from "@/lib/db";
 import { listDevInventoryItems, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import { rerankProductRecommendationsWithAvailability } from "@/lib/recommendation/availabilityRanking";
 import { getCategoryRecommendations } from "@/lib/recommendation/categoryEngine";
@@ -36,7 +35,7 @@ function mapInventoryItem(item: MongoInventoryItem): InventoryItem {
   };
 }
 
-function mapProfile(record: PrismaUserProfile): UserProfile {
+function mapProfile(record: UserProfileRecord): UserProfile {
   const roomConstraints = normalizeRoomConstraints(record.roomConstraints);
 
   return {
@@ -99,7 +98,7 @@ function findRecommendationRank(
 }
 
 function buildRecommendationInput(
-  profileRecord: PrismaUserProfile,
+  profileRecord: UserProfileRecord,
   inventoryRecords: MongoInventoryItem[],
 ): RecommendationInput {
   const profile = mapProfile(profileRecord);
@@ -121,7 +120,7 @@ export async function createWatchlistAlerts({
     include: {
       savedProducts: true,
     },
-  });
+  }) as Array<UserProfileRecord & { savedProducts: Array<{ id: string; productModelId: string; targetPriceCents: number | null }> }>;
   const inventoryRecords = await listDevInventoryItems();
   const alertRows: Array<{
     userProfileId: string;

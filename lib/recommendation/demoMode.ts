@@ -1,6 +1,6 @@
 import { productCatalog } from "../../data/seeds/productCatalog";
 import { getProductRecommendations } from "./productEngine";
-import { rankCategories } from "./scoring";
+import { getCategoryRecommendations } from "./categoryEngine";
 import type {
   InventoryItem,
   ProductCategory,
@@ -166,7 +166,7 @@ export function buildHackathonDemoPriorityList(
   input: RecommendationInput = buildHackathonDemoRecommendationInput(),
 ): DemoPriorityRecommendation[] {
   const categoryRankings = new Map(
-    rankCategories(input.profile, input.inventory).map((categoryRecommendation) => [
+    getCategoryRecommendations(input).map((categoryRecommendation) => [
       categoryRecommendation.category,
       categoryRecommendation,
     ]),

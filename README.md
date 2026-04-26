@@ -136,7 +136,6 @@ That means the scoring, budget logic, ranking order, and availability state rema
 - React 19
 - TypeScript
 - Tailwind CSS
-- Prisma + SQLite
 - MongoDB
 - TensorFlow.js COCO-SSD
 - Optional Clerk auth
@@ -145,8 +144,7 @@ That means the scoring, budget logic, ranking order, and availability state rema
 
 ## Architecture Highlights
 
-- SQLite stores profiles, recommendations, alerts, cached availability, job runs, narrator cache, and training examples.
-- MongoDB stores users, inventory items, and the device catalog that powers search and fit scoring.
+- MongoDB stores profiles, inventory, recommendations, alerts, cached availability, job runs, narrator cache, training examples, users, and the device catalog.
 - PricesAPI is background-only, so the UI reads cached availability instead of blocking on live requests.
 - Best Buy search is used only to enrich device lookup during inventory entry.
 
@@ -165,7 +163,6 @@ Copy `.env.example` to `.env.local` or `.env`.
 Required:
 
 ```bash
-DATABASE_URL="file:./dev.db"
 MONGODB_URI="mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/lifeupgrade"
 MONGODB_DB_NAME="lifeupgrade"
 ```
@@ -185,7 +182,6 @@ DEV_USER_ID="dev-user"
 
 ```bash
 npm install
-npm run db:init
 npm run db:setup-indexes
 npm run db:seed-devices
 npm run dev

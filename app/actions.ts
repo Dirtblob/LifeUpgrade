@@ -6,13 +6,14 @@ import { db } from "@/lib/db";
 import { getCachedAvailabilitySummaries } from "@/lib/availability";
 import { maybeAutoRefreshTopRecommendationPrice } from "@/lib/availability/autoRefresh";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
+import { displayNameForMongoUser } from "@/lib/currentUser";
 import { getCurrentMongoUser } from "@/lib/devUser";
 import { replaceDevInventoryItems } from "@/lib/inventory/mongoInventory";
-import { loadMongoRecommendationProducts, recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { productCatalog } from "@/data/seeds/productCatalog";
 import {
   buildHackathonDemoRecommendationInput,
   hackathonDemoInventoryRecords,
-  hackathonDemoProfile,
   serializeHackathonDemoProfile,
 } from "@/lib/recommendation/demoMode";
 import { rankProductsForInput } from "@/lib/recommendation/productEngine";
@@ -32,8 +33,13 @@ function priorityForScore(score: number): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
 }
 
 export async function runLaptopOnlyStudentDemoAction(): Promise<void> {
-  const profileData = serializeHackathonDemoProfile();
-  const candidateProducts = await loadMongoRecommendationProducts();
+  const mongoUser = await getCurrentMongoUser();
+  const profileName = displayNameForMongoUser(mongoUser);
+  const profileData = {
+    ...serializeHackathonDemoProfile(),
+    name: profileName,
+  };
+  const candidateProducts = productCatalog;
   const availabilityProductModels = candidateProducts.map((product) =>
     recommendationProductToAvailabilityModel(product, { allowUsed: true }),
   );
@@ -42,16 +48,19 @@ export async function runLaptopOnlyStudentDemoAction(): Promise<void> {
     getCachedAvailabilitySummaries(availabilityProductModels),
     loadCachedRecommendationPriceSnapshots(availabilityProductModels),
   ]);
+  const demoInput = buildHackathonDemoRecommendationInput();
   const recommendationInput = {
-    ...buildHackathonDemoRecommendationInput(),
+    ...demoInput,
+    profile: {
+      ...demoInput.profile,
+      id: mongoUser.id,
+      name: profileName,
+    },
     candidateProducts,
     availabilityByProductId,
     pricingByProductId,
   };
-  const [mongoUser, privateProfile] = await Promise.all([
-    getCurrentMongoUser(),
-    getCurrentUserPrivateProfile(),
-  ]);
+  const privateProfile = await getCurrentUserPrivateProfile();
   let recommendations = rankProductsForInput(recommendationInput).slice(0, 8);
   const refreshedTopPrice = await maybeAutoRefreshTopRecommendationPrice({
     productModel: availabilityModelsByProductId.get(recommendations[0]?.product.id ?? ""),
@@ -94,76 +103,77 @@ export async function runLaptopOnlyStudentDemoAction(): Promise<void> {
     ].filter((value): value is string => Boolean(value?.trim())),
   });
 
-  await db.$transaction(async (tx) => {
-    await tx.userProfile.upsert({
-      where: { id: hackathonDemoProfile.id },
-      update: profileData,
-      create: {
-        id: hackathonDemoProfile.id,
-        ...profileData,
+  await db.userProfile.upsert({
+    where: { id: mongoUser.id },
+    update: profileData,
+    create: {
+      id: mongoUser.id,
+      ...profileData,
+    },
+  });
+
+  await db.savedProduct.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+  await db.watchlistAlert.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+  await db.recommendation.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+
+  if (recommendations.length > 0) {
+    await db.recommendation.createMany({
+      data: recommendations.map((recommendation) => ({
+        userProfileId: mongoUser.id,
+        category: recommendation.product.category,
+        productModelId: recommendation.product.id,
+        score: recommendation.score,
+        priority: priorityForScore(recommendation.score),
+        problemSolved: JSON.stringify(
+          recommendationInput.profile.problems
+            .filter((problem) => recommendation.product.solves.includes(problem))
+            .slice(0, 4),
+        ),
+        explanation: recommendation.explanation.problemSolved,
+      })),
+    });
+  }
+
+  if (watchedRecommendation && watchedProduct) {
+    await db.savedProduct.create({
+      data: {
+        userProfileId: mongoUser.id,
+        productModelId: watchedRecommendation.product.id,
+        targetPriceCents: DEMO_WATCHED_PRODUCT_TARGET_CENTS,
+        notifyThreshold: 80,
       },
     });
 
-    await tx.savedProduct.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+    await db.availabilitySnapshot.deleteMany({
+      where: {
+        productModelId: watchedRecommendation.product.id,
+        provider: "mock",
+      },
     });
-    await tx.recommendation.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+    await db.availabilitySnapshot.create({
+      data: {
+        productModelId: watchedRecommendation.product.id,
+        provider: "mock",
+        title: `${watchedProduct.name} older demo listing`,
+        brand: watchedProduct.brand,
+        model: watchedProduct.name,
+        retailer: "Mock Marketplace",
+        available: true,
+        priceCents: DEMO_WATCHED_PRODUCT_OLD_PRICE_CENTS,
+        totalPriceCents: DEMO_WATCHED_PRODUCT_OLD_PRICE_CENTS,
+        url: `https://mock-marketplace.example/listings/${watchedRecommendation.product.id}-demo-old`,
+        condition: "new",
+        confidence: 88,
+        checkedAt: new Date(Date.now() - 1000 * 60 * 60 * 14),
+      },
     });
-
-    if (recommendations.length > 0) {
-      await tx.recommendation.createMany({
-        data: recommendations.map((recommendation) => ({
-          userProfileId: hackathonDemoProfile.id,
-          category: recommendation.product.category,
-          productModelId: recommendation.product.id,
-          score: recommendation.score,
-          priority: priorityForScore(recommendation.score),
-          problemSolved: JSON.stringify(
-            recommendationInput.profile.problems
-              .filter((problem) => recommendation.product.solves.includes(problem))
-              .slice(0, 4),
-          ),
-          explanation: recommendation.explanation.problemSolved,
-        })),
-      });
-    }
-
-    if (watchedRecommendation && watchedProduct) {
-      await tx.savedProduct.create({
-        data: {
-          userProfileId: hackathonDemoProfile.id,
-          productModelId: watchedRecommendation.product.id,
-          targetPriceCents: DEMO_WATCHED_PRODUCT_TARGET_CENTS,
-          notifyThreshold: 80,
-        },
-      });
-
-      await tx.availabilitySnapshot.deleteMany({
-        where: {
-          productModelId: watchedRecommendation.product.id,
-          provider: "mock",
-        },
-      });
-      await tx.availabilitySnapshot.create({
-        data: {
-          productModelId: watchedRecommendation.product.id,
-          provider: "mock",
-          title: `${watchedProduct.name} older demo listing`,
-          brand: watchedProduct.brand,
-          model: watchedProduct.name,
-          retailer: "Mock Marketplace",
-          available: true,
-          priceCents: DEMO_WATCHED_PRODUCT_OLD_PRICE_CENTS,
-          totalPriceCents: DEMO_WATCHED_PRODUCT_OLD_PRICE_CENTS,
-          url: `https://mock-marketplace.example/listings/${watchedRecommendation.product.id}-demo-old`,
-          condition: "new",
-          confidence: 88,
-          checkedAt: new Date(Date.now() - 1000 * 60 * 60 * 14),
-        },
-      });
-    }
-  });
+  }
 
   await replaceDevInventoryItems(
     hackathonDemoInventoryRecords.map((item) => ({

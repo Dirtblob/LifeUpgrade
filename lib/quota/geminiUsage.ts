@@ -1,13 +1,14 @@
 import { db } from "@/lib/db";
 import type { ApiUsagePeriodType } from "./types";
 import { buildPeriodKey } from "./pricesApiQuota";
+import { getGeminiDailySoftCap, getGeminiModel } from "./geminiConfig";
+
+export { getGeminiDailySoftCap, getGeminiModel } from "./geminiConfig";
 
 const GEMINI_PROVIDER = "gemini";
 const GEMINI_CACHE_HIT_PROVIDER = "gemini:cache_hit";
 const GEMINI_FAILURE_PROVIDER = "gemini:failure";
 const GEMINI_FALLBACK_PROVIDER = "gemini:fallback";
-const DEFAULT_GEMINI_MODEL = "gemma-4-26b-a4b-it";
-const DEFAULT_GEMINI_DAILY_SOFT_CAP = 200;
 
 export type GeminiUsageMetric = "cache_hit" | "failure" | "fallback";
 
@@ -54,14 +55,6 @@ interface GeminiUsageDbClient {
       };
     }): Promise<unknown>;
   };
-}
-
-function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
-  return parsed;
 }
 
 function providerForMetric(metric: GeminiUsageMetric): string {
@@ -116,14 +109,6 @@ async function incrementDailyCounter(
       callCount: count,
     },
   });
-}
-
-export function getGeminiModel(env: NodeJS.ProcessEnv = process.env): string {
-  return env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
-}
-
-export function getGeminiDailySoftCap(env: NodeJS.ProcessEnv = process.env): number {
-  return parseNonNegativeInteger(env.GEMINI_DAILY_SOFT_CAP, DEFAULT_GEMINI_DAILY_SOFT_CAP);
 }
 
 export async function getGeminiUsageSnapshot(

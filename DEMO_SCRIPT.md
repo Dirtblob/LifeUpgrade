@@ -160,7 +160,7 @@ What is quota-limited:
 
 Known limitations:
 
-- No auth; this is a local SQLite MVP.
+- Auth is optional; the MVP data path is MongoDB-backed.
 - Admin catalog approval does not rewrite the seed catalog file.
 - Scan output estimates categories, not exact models.
-- Multi-region production would need a centralized quota lock beyond the local SQLite/process guard.
+- Multi-region production would need a stronger distributed quota lock around live price refreshes.

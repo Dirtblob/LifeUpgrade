@@ -493,7 +493,7 @@ export function DeviceAutocomplete({
                 </span>
               ))}
             </div>
-            <DeviceTraitBars ratings={traitRatings(selectedResult)} compact />
+            <DeviceTraitBars ratings={traitRatings(selectedResult)} compact tone="dark" />
           </div>
         </div>
       ) : null}

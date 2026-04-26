@@ -125,7 +125,7 @@ export function buildLivePriceCardState(
   return {
     status,
     statusLabel: labelForStatus(status),
-    availabilityLabel: summary?.label ?? "Checking not configured",
+    availabilityLabel: summary?.label ?? "Availability unknown",
     bestOffer,
     offerCount: summary?.listings.length ?? 0,
     fetchedAtIso: summary?.checkedAt?.toISOString() ?? null,

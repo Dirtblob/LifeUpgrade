@@ -30,7 +30,7 @@ describe("getAvailabilityStatusBadge", () => {
       getAvailabilityStatusBadge(
         summary({
           status: "checking_not_configured",
-          label: "Checking not configured",
+          label: "Availability unknown",
           provider: null,
           checkedAt: null,
           refreshSource: "not_configured",

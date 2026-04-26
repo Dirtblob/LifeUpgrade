@@ -12,6 +12,7 @@ export interface MongoIndexSetupSummary {
     productSearchCache: string[];
     catalogEnrichmentCandidates: string[];
     apiUsageEvents: string[];
+    appData: string[];
   };
 }
 
@@ -67,6 +68,16 @@ export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary>
     productSearchCache,
     catalogEnrichmentCandidates,
     apiUsageEvents,
+    userProfiles,
+    recommendations,
+    savedProducts,
+    watchlistAlerts,
+    availabilitySnapshots,
+    recommendationExplanationCache,
+    trainingExamples,
+    jobRuns,
+    apiUsage,
+    recentlyViewedProducts,
   ] = await Promise.all([
     db.collection("users").createIndexes([
       { key: { sourceKey: 1 }, unique: true },
@@ -126,6 +137,49 @@ export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary>
       { key: { deviceCatalogId: 1 }, sparse: true },
       { key: { userId: 1 }, sparse: true },
     ]),
+    db.collection("user_profiles").createIndexes([
+      { key: { id: 1 }, unique: true },
+      { key: { createdAt: -1 } },
+    ]),
+    db.collection("recommendations").createIndexes([
+      { key: { userProfileId: 1, createdAt: -1 } },
+      { key: { score: -1, createdAt: -1 } },
+      { key: { productModelId: 1 }, sparse: true },
+    ]),
+    db.collection("saved_products").createIndexes([
+      { key: { userProfileId: 1, createdAt: -1 } },
+      { key: { userProfileId: 1, productModelId: 1 } },
+      { key: { targetPriceCents: 1 }, sparse: true },
+    ]),
+    db.collection("watchlist_alerts").createIndexes([
+      { key: { userProfileId: 1, seen: 1, createdAt: -1 } },
+      { key: { savedProductId: 1, createdAt: -1 } },
+      { key: { productModelId: 1, createdAt: -1 } },
+    ]),
+    db.collection("availability_snapshots").createIndexes([
+      { key: { productModelId: 1, checkedAt: -1 } },
+      { key: { provider: 1, productModelId: 1, checkedAt: -1 } },
+    ]),
+    db.collection("recommendation_explanation_cache").createIndexes([
+      { key: { recommendationId: 1, productId: 1, inputHash: 1 }, unique: true },
+      { key: { productId: 1, updatedAt: -1 } },
+      { key: { source: 1, updatedAt: -1 } },
+    ]),
+    db.collection("training_examples").createIndexes([
+      { key: { createdAt: -1 } },
+      { key: { source: 1, createdAt: -1 } },
+    ]),
+    db.collection("job_runs").createIndexes([
+      { key: { jobName: 1, createdAt: -1 } },
+    ]),
+    db.collection("api_usage").createIndexes([
+      { key: { provider: 1, periodType: 1, periodKey: 1 }, unique: true },
+      { key: { provider: 1, updatedAt: -1 } },
+    ]),
+    db.collection("recently_viewed_products").createIndexes([
+      { key: { userProfileId: 1, productModelId: 1 }, unique: true },
+      { key: { userProfileId: 1, viewedAt: -1 } },
+    ]),
   ]);
   const deviceCatalogTextIndex = await ensureDeviceCatalogTextIndex(deviceCatalogCollection);
 
@@ -141,6 +195,18 @@ export async function setupMongoIndexes(db: Db): Promise<MongoIndexSetupSummary>
       productSearchCache,
       catalogEnrichmentCandidates,
       apiUsageEvents,
+      appData: [
+        ...userProfiles,
+        ...recommendations,
+        ...savedProducts,
+        ...watchlistAlerts,
+        ...availabilitySnapshots,
+        ...recommendationExplanationCache,
+        ...trainingExamples,
+        ...jobRuns,
+        ...apiUsage,
+        ...recentlyViewedProducts,
+      ],
     },
   };
 }

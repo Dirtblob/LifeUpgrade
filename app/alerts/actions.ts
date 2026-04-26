@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { ensureCurrentUserProfile } from "@/lib/currentUser";
+import { getCurrentUserProfileRecord } from "@/lib/currentUser";
 import { db } from "@/lib/db";
 
 export async function markAlertSeenAction(formData: FormData): Promise<void> {
@@ -12,7 +12,10 @@ export async function markAlertSeenAction(formData: FormData): Promise<void> {
     redirect("/alerts");
   }
 
-  const profile = await ensureCurrentUserProfile();
+  const profile = await getCurrentUserProfileRecord();
+  if (!profile) {
+    redirect("/alerts");
+  }
 
   await db.watchlistAlert.updateMany({
     where: {

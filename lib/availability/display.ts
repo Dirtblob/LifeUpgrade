@@ -1,8 +1,19 @@
 import type { AvailabilitySummary } from "./types";
 
 interface AvailabilityStatusBadge {
-  label: "Fresh price" | "Cached price from PricesAPI" | "PricesAPI quota-limited" | "Unknown availability";
+  label: string;
   className: string;
+}
+
+const providerDisplayNames: Record<string, string> = {
+  bestbuy: "Best Buy",
+  pricesapi: "PricesAPI",
+  mock: "Mock",
+};
+
+function formatProviderName(provider: string | null | undefined, fallback = "pricing provider"): string {
+  if (!provider) return fallback;
+  return providerDisplayNames[provider] ?? provider;
 }
 
 function pluralize(value: number, unit: string): string {
@@ -51,7 +62,7 @@ export function availabilityDetailMessages(
   const messages: string[] = [];
 
   if (summary.refreshSource === "cached" && summary.checkedAt) {
-    messages.push("Cached price from PricesAPI");
+    messages.push(`Cached price from ${formatProviderName(summary.provider)}`);
   }
 
   if (summary.isStale) {
@@ -65,7 +76,7 @@ export function availabilityDetailMessages(
   }
 
   if (summary.refreshSkippedReason === "free_tier_quota") {
-    messages.push("Skipped due to PricesAPI free-tier quota");
+    messages.push(`Skipped due to ${formatProviderName(summary.provider)} free-tier quota`);
   }
 
   return messages;
@@ -81,7 +92,7 @@ export function getAvailabilityStatusBadge(summary: AvailabilitySummary | undefi
 
   if (summary.refreshSkippedReason === "free_tier_quota") {
     return {
-      label: "PricesAPI quota-limited",
+      label: `${formatProviderName(summary.provider, "Pricing")} quota-limited`,
       className: "bg-rose-400/16 text-rose-100",
     };
   }
@@ -95,7 +106,7 @@ export function getAvailabilityStatusBadge(summary: AvailabilitySummary | undefi
 
   if (summary.refreshSource === "cached") {
     return {
-      label: "Cached price from PricesAPI",
+      label: `Cached price from ${formatProviderName(summary.provider)}`,
       className: "bg-amber-300/20 text-amber-100",
     };
   }

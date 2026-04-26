@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { getCurrentMongoUser } from "@/lib/devUser";
 import { deleteDevInventoryItems } from "@/lib/inventory/mongoInventory";
-import { hackathonDemoProfile } from "@/lib/recommendation/demoMode";
 import { buildToastHref } from "@/lib/ui/toasts";
 
 function revalidateLocalProfileViews(): void {
@@ -13,13 +13,16 @@ function revalidateLocalProfileViews(): void {
   revalidatePath("/inventory");
   revalidatePath("/recommendations");
   revalidatePath("/settings");
+  revalidatePath("/alerts");
 }
 
 export async function deleteLocalProfileAction(): Promise<void> {
+  const user = await getCurrentMongoUser();
+
   await Promise.all([
     deleteDevInventoryItems(),
     db.userProfile.deleteMany({
-      where: { id: hackathonDemoProfile.id },
+      where: { id: user.id },
     }),
   ]);
 
@@ -28,10 +31,18 @@ export async function deleteLocalProfileAction(): Promise<void> {
 }
 
 export async function deleteLocalInventoryAction(): Promise<void> {
+  const user = await getCurrentMongoUser();
+
   await Promise.all([
     deleteDevInventoryItems(),
     db.recommendation.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+      where: { userProfileId: user.id },
+    }),
+    db.savedProduct.deleteMany({
+      where: { userProfileId: user.id },
+    }),
+    db.watchlistAlert.deleteMany({
+      where: { userProfileId: user.id },
     }),
   ]);
 

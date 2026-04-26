@@ -1,0 +1,26 @@
+{
+  "visionScan": {
+    "recordedAtIso": "2026-04-26T11:44:40.950Z",
+    "modelStatus": "loaded",
+    "summary": {
+      "sampledFrameCount": 19,
+      "totalDetections": 26,
+      "estimatedStyle": "cluttered",
+      "possibleIssues": [
+        "Desk appears cluttered"
+      ],
+      "detectedCategories": [],
+      "suggestedInventoryCount": 0
+    }
+  },
+  "latestNarrationErrors": [
+    {
+      "provider": "gemma",
+      "message": "Gemini request failed with status 404",
+      "productId": "stand-insignia-adjustable",
+      "category": "laptop_stand",
+      "recordedAtIso": "2026-04-26T11:21:17.266Z"
+    }
+  ],
+  "lastBackgroundJobError": null
+}

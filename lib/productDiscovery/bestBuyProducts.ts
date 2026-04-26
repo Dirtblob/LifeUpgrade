@@ -167,7 +167,7 @@ function normalizeProduct(product: BestBuyProductRecord, category: string | null
     priceCents,
     url: textValue(product.url),
     imageUrl: textValue(product.image),
-    available: product.onlineAvailability !== false || product.inStoreAvailability === true,
+    available: product.onlineAvailability === true || product.inStoreAvailability === true,
   };
 }
 

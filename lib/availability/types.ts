@@ -52,7 +52,7 @@ export interface AvailabilitySummary {
   provider: string | null;
   productModelId: string;
   status: AvailabilityDisplayStatus;
-  label: "Available" | "Unavailable" | "Checking not configured";
+  label: "Available" | "Unavailable" | "Availability unknown";
   listings: AvailabilityResult[];
   bestListing: AvailabilityResult | null;
   checkedAt: Date | null;

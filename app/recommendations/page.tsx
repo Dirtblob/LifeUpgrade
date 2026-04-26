@@ -100,7 +100,7 @@ function pillTone(enabled: boolean): string {
 
 function availabilityTone(status: string): string {
   if (status === "available") return "bg-emerald-500/20 text-emerald-100";
-  if (status === "checking_not_configured") return "bg-amber-300/20 text-amber-100";
+  if (status === "checking_not_configured") return "bg-white/10 text-slate-300";
   return "bg-rose-500/20 text-rose-100";
 }
 
@@ -130,17 +130,17 @@ export default async function RecommendationsPage({ searchParams }: { searchPara
     return (
       <div className="rounded-[2rem] border border-dashed border-ink/15 bg-white/85 p-10 text-center shadow-panel">
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-clay">Recommendations</p>
-        <h1 className="mt-3 font-display text-3xl font-semibold">No profile is ready for scoring yet.</h1>
+        <h1 className="mt-3 font-display text-3xl font-semibold">Create a profile before scoring upgrades.</h1>
         <p className="mx-auto mt-4 max-w-2xl leading-7 text-ink/65">
-          Finish onboarding and add a few inventory items first, then this page will rank upgrade opportunities,
+          Recommendations need your onboarding profile first, then this page can rank upgrade opportunities,
           recommended categories, and specific models to consider.
         </p>
-        <div className="mt-6 flex justify-center gap-3">
+        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
           <Link href="/onboarding" className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white">
             Complete onboarding
           </Link>
           <Link href="/inventory" className="rounded-full border border-ink/10 px-5 py-3 text-sm font-semibold text-ink">
-            Add inventory
+            Open inventory
           </Link>
         </div>
       </div>
@@ -571,9 +571,12 @@ export default async function RecommendationsPage({ searchParams }: { searchPara
 
                 <div className="mt-6 grid gap-5 xl:grid-cols-2">
                   {categoryView.products.slice(0, 3).map((productView) => {
+                    const catalogCents = productView.recommendation.product.priceUsd > 0
+                      ? Math.round(productView.recommendation.product.priceUsd * 100)
+                      : null;
                     const livePriceState = buildLivePriceCardState(
                       productView.availability,
-                      Math.round(productView.recommendation.product.priceUsd * 100),
+                      catalogCents,
                     );
                     const narration = narrationByProductId.get(productView.recommendation.product.id);
                     const narrationOutput = narration?.output;
@@ -607,7 +610,7 @@ export default async function RecommendationsPage({ searchParams }: { searchPara
                             ) : null}
                             <p className="mt-2 text-sm font-medium text-slate-300">
                               {productView.recommendation.product.brand} · {categoryLabels[productView.recommendation.product.category]} ·{" "}
-                              {formatUsd(productView.recommendation.product.priceUsd)}
+                              {productView.recommendation.product.priceUsd > 0 ? formatUsd(productView.recommendation.product.priceUsd) : "Price TBD"}
                             </p>
                           </div>
                           <ScoreBadge score={productView.recommendation.score} />

@@ -1,7 +1,7 @@
 import type { RecommendationNarratorProvider, RecommendationNarratorProviderRequest } from "./types";
-import { getGeminiModel } from "@/lib/quota/geminiUsage";
+import { getGeminiModel } from "@/lib/quota/geminiConfig";
 
-const GEMMA_TIMEOUT_MS = 20_000;
+const DEFAULT_GEMMA_TIMEOUT_MS = 45_000;
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
 interface GeminiGenerateContentResponse {
@@ -28,10 +28,18 @@ export interface GemmaProviderOptions {
   model?: string;
   fetchImpl?: typeof fetch;
   logger?: Pick<Console, "error">;
+  timeoutMs?: number;
 }
 
 function trimTrailingSlash(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+function normalizeApiBaseUrl(value: string): string {
+  const trimmed = trimTrailingSlash(value.trim());
+  // The Gemini OpenAI-compatible base ends in /openai, but this provider uses
+  // the native generateContent endpoint.
+  return trimmed.endsWith("/openai") ? trimmed.slice(0, -"/openai".length) : trimmed;
 }
 
 function normalizeModelPath(model: string): string {
@@ -39,9 +47,29 @@ function normalizeModelPath(model: string): string {
   return trimmed.startsWith("models/") ? trimmed : `models/${trimmed}`;
 }
 
+function normalizeModelId(model: string): string {
+  return model.trim().replace(/^models\//, "");
+}
+
+function usesLegacyGemmaApi(model: string): boolean {
+  return /^gemma-3n?-/.test(normalizeModelId(model));
+}
+
 function buildGenerateContentUrl(apiBaseUrl: string, model: string): string {
-  const normalized = trimTrailingSlash(apiBaseUrl.trim());
+  const normalized = normalizeApiBaseUrl(apiBaseUrl);
   return `${normalized}/${normalizeModelPath(model)}:generateContent`;
+}
+
+function buildUserPrompt(request: RecommendationNarratorProviderRequest, includeSystem: boolean): string {
+  if (!includeSystem) return request.prompt;
+
+  return [
+    "System instructions:",
+    request.system,
+    "",
+    "User prompt:",
+    request.prompt,
+  ].join("\n");
 }
 
 function extractContent(body: GeminiGenerateContentResponse): string {
@@ -76,6 +104,14 @@ function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cancel: 
   };
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
 function logGemmaError(logger: Pick<Console, "error">, error: unknown): void {
   logger.error("[llm][gemma] request failed", {
     error: error instanceof Error ? error.message : String(error),
@@ -88,15 +124,27 @@ export function createGemmaProvider({
   model = getGeminiModel(),
   fetchImpl = fetch,
   logger = console,
+  timeoutMs = DEFAULT_GEMMA_TIMEOUT_MS,
 }: GemmaProviderOptions): RecommendationNarratorProvider {
   const endpoint = buildGenerateContentUrl(apiBaseUrl, model);
+  const legacyGemmaApi = usesLegacyGemmaApi(model);
 
   return {
     name: "gemma",
     async completeJson(request: RecommendationNarratorProviderRequest): Promise<string> {
-      const { signal, cancel } = createTimeoutSignal(GEMMA_TIMEOUT_MS);
+      const { signal, cancel } = createTimeoutSignal(timeoutMs);
 
       try {
+        const generationConfig = {
+          temperature: request.temperature ?? 0.2,
+          maxOutputTokens: request.maxTokens ?? 500,
+          ...(!legacyGemmaApi
+            ? {
+                responseMimeType: "application/json",
+                ...(request.responseSchema ? { responseSchema: request.responseSchema } : {}),
+              }
+            : {}),
+        };
         const response = await fetchImpl(endpoint, {
           method: "POST",
           headers: {
@@ -105,20 +153,20 @@ export function createGemmaProvider({
           },
           signal,
           body: JSON.stringify({
-            system_instruction: {
-              parts: [{ text: request.system }],
-            },
+            ...(!legacyGemmaApi
+              ? {
+                  system_instruction: {
+                    parts: [{ text: request.system }],
+                  },
+                }
+              : {}),
             contents: [
               {
                 role: "user",
-                parts: [{ text: request.prompt }],
+                parts: [{ text: buildUserPrompt(request, legacyGemmaApi) }],
               },
             ],
-            generationConfig: {
-              temperature: request.temperature ?? 0.2,
-              maxOutputTokens: request.maxTokens ?? 500,
-              responseMimeType: "application/json",
-            },
+            generationConfig,
           }),
         });
 
@@ -159,5 +207,6 @@ export function getGemmaProviderFromEnv(
     apiKey,
     model: getGeminiModel(env),
     fetchImpl,
+    timeoutMs: parsePositiveInteger(env.GEMINI_TIMEOUT_MS, DEFAULT_GEMMA_TIMEOUT_MS),
   });
 }

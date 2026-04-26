@@ -340,6 +340,7 @@ export function createPricesApiProvider(options: PricesApiProviderOptions = {}):
       const cachedSnapshot = await findPriceSnapshot({
         slug: cacheSlug(productModel),
         normalizedQueries: requests.map((request) => request.query),
+        provider: providerName,
       });
 
       const hasFreshCache = cachedSnapshot ? cachedSnapshot.expiresAt.getTime() > Date.now() : false;

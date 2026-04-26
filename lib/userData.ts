@@ -1,12 +1,11 @@
-import type { SavedProduct, UserProfile as PrismaUserProfile } from "@prisma/client";
 import { productCatalog } from "@/data/seeds/productCatalog";
 import { getCachedAvailabilitySummaries, type AvailabilityProductModel, type AvailabilitySummary } from "@/lib/availability";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
-import { db } from "@/lib/db";
+import { db, type SavedProductRecord, type UserProfileRecord } from "@/lib/db";
 import { getCurrentMongoUser } from "@/lib/devUser";
 import { listInventoryItemsForUser, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import { parseProfileMetadata } from "@/lib/profileMetadata";
-import { loadMongoRecommendationProducts, recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
 import {
   normalizeInventoryCategories,
   normalizeRoomConstraints,
@@ -37,8 +36,8 @@ interface LoadedRecommendationContext {
   candidateProducts: Product[];
 }
 
-type RecommendationContextProfileRecord = PrismaUserProfile & {
-  savedProducts: SavedProduct[];
+type RecommendationContextProfileRecord = UserProfileRecord & {
+  savedProducts: SavedProductRecord[];
 };
 
 const productIdAliasMap: Record<string, string> = {
@@ -151,7 +150,7 @@ function buildCheckingSummary(productModelId: string): AvailabilitySummary {
     provider: null,
     productModelId,
     status: "checking_not_configured",
-    label: "Checking not configured",
+    label: "Availability unknown",
     listings: [],
     bestListing: null,
     checkedAt: null,
@@ -160,13 +159,10 @@ function buildCheckingSummary(productModelId: string): AvailabilitySummary {
 }
 
 async function loadRecommendationProducts(): Promise<Product[]> {
-  try {
-    const products = await loadMongoRecommendationProducts();
-    return products.length > 0 ? products : productCatalog;
-  } catch (error) {
-    console.warn("Falling back to static product catalog for recommendations.", error);
-    return productCatalog;
-  }
+  // The static catalog is the curated recommendation source with Best Buy
+  // SKUs and verified pricing. MongoDB enriches device matching and trait
+  // comparisons but does not replace the recommendable product list.
+  return productCatalog;
 }
 
 async function loadMongoRecommendationUserData(): Promise<{
@@ -289,15 +285,11 @@ export async function loadRecommendationContext(): Promise<LoadedRecommendationC
   let activeProfile: RecommendationContextProfileRecord | null;
 
   try {
-    activeProfile =
-      (await db.userProfile.findUnique({
-        where: { id: "demo-profile" },
-        include: { savedProducts: true },
-      })) ??
-      (await db.userProfile.findFirst({
-        include: { savedProducts: true },
-        orderBy: { createdAt: "desc" },
-      }));
+    const mongoUser = await getCurrentMongoUser();
+    activeProfile = await db.userProfile.findUnique({
+      where: { id: mongoUser.id },
+      include: { savedProducts: true },
+    }) as RecommendationContextProfileRecord | null;
   } catch (error) {
     console.warn("Unable to load recommendation profile.", error);
     return null;
@@ -307,10 +299,11 @@ export async function loadRecommendationContext(): Promise<LoadedRecommendationC
 }
 
 export async function loadLatestRecommendationContext(): Promise<LoadedRecommendationContext | null> {
-  const activeProfile = await db.userProfile.findFirst({
+  const mongoUser = await getCurrentMongoUser();
+  const activeProfile = await db.userProfile.findUnique({
+    where: { id: mongoUser.id },
     include: { savedProducts: true },
-    orderBy: { createdAt: "desc" },
-  });
+  }) as RecommendationContextProfileRecord | null;
 
   return loadRecommendationContextForProfile(activeProfile);
 }

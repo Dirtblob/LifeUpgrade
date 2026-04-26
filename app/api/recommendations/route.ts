@@ -5,9 +5,9 @@ import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/price
 import { getCurrentMongoUser, UnauthorizedMongoUserError } from "@/lib/devUser";
 import { listInventoryItemsForUser, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import {
-  loadMongoRecommendationProducts,
   recommendationProductToAvailabilityModel,
 } from "@/lib/recommendation/mongoDeviceProducts";
+import { productCatalog } from "@/data/seeds/productCatalog";
 import { rankProductsForInput } from "@/lib/recommendation/productEngine";
 import { saveRecommendationRunLog } from "@/lib/recommendation/recommendationLogs";
 import type {
@@ -194,7 +194,7 @@ async function generateRecommendationsResponse(): Promise<NextResponse> {
     const [inventoryRecords, privateProfileRecord, candidateProducts] = await Promise.all([
       listInventoryItemsForUser(mongoUser._id),
       getUserPrivateProfileForUser(mongoUser._id),
-      loadMongoRecommendationProducts(),
+      Promise.resolve(productCatalog),
     ]);
 
     const inventory = inventoryRecords.map(mapInventoryItem);

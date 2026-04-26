@@ -1,6 +1,6 @@
 import { productCatalog } from "@/data/seeds/productCatalog";
 import { getPricesApiProviderName } from "@/lib/availability/pricesApiProvider";
-import { db } from "@/lib/db";
+import { db, type RecommendationRecord } from "@/lib/db";
 import { getGemmaProviderFromEnv } from "@/lib/llm/gemmaProvider";
 import { buildPricesApiDashboardMetrics } from "@/lib/quota/dashboard";
 import { getGeminiUsageSnapshot } from "@/lib/quota/geminiUsage";
@@ -26,6 +26,13 @@ export interface RecommendationScoreChange {
   priceDeltaFromExpected: number | null;
   rankingChangedReason: string;
 }
+
+type RecommendationWithProfile = RecommendationRecord & {
+  userProfile: {
+    name: string | null;
+    profession: string;
+  } | null;
+};
 
 function hasSpecs(product: (typeof productCatalog)[number]): boolean {
   return Object.keys(product.features ?? {}).length > 0;
@@ -73,7 +80,7 @@ export async function buildAdminDashboardData() {
           },
         },
       },
-    }),
+    }) as Promise<RecommendationWithProfile[]>,
     loadRecommendationContext(),
     readAdminDebugState(),
     getGeminiUsageSnapshot(now),

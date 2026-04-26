@@ -16,7 +16,10 @@ function availabilityStatus(summary: AvailabilitySummary | undefined): ProductRe
 }
 
 function productExpectedPriceCents(recommendation: ProductRecommendation): number {
-  return Math.max(1, Math.round(recommendation.product.priceUsd * 100));
+  const cents = recommendation.product.estimatedPriceCents
+    ?? recommendation.product.typicalUsedPriceCents
+    ?? (recommendation.product.priceUsd > 0 ? recommendation.product.priceUsd * 100 : 0);
+  return cents > 0 ? Math.round(cents) : 0;
 }
 
 function getSummary(

@@ -1,8 +1,7 @@
-import type { UserProfile as PrismaUserProfile } from "@prisma/client";
 import { productCatalogToAvailabilityModels } from "@/lib/availability/catalogModels";
 import { getCachedAvailabilitySummaries } from "@/lib/availability";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
-import { db } from "@/lib/db";
+import { db, type UserProfileRecord } from "@/lib/db";
 import { listDevInventoryItems, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import { getCategoryRecommendations } from "@/lib/recommendation/categoryEngine";
 import { rankProductsForInput } from "@/lib/recommendation/productEngine";
@@ -32,7 +31,7 @@ function mapInventoryItem(item: MongoInventoryItem): InventoryItem {
   };
 }
 
-function mapProfile(record: PrismaUserProfile): UserProfile {
+function mapProfile(record: UserProfileRecord): UserProfile {
   const roomConstraints = normalizeRoomConstraints(record.roomConstraints);
 
   return {

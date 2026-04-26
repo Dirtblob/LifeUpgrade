@@ -6,6 +6,7 @@ import {
   normalizePriceSnapshotQuery,
   type PriceSnapshotDocument,
 } from "@/lib/availability/priceSnapshots";
+import { getBestBuyProvider, isBestBuyConfigured } from "@/lib/availability/bestBuyProvider";
 import {
   getPricesApiProvider,
   isPricesApiConfigured,
@@ -21,6 +22,7 @@ import type { AvailabilityProductModel, AvailabilityResult, AvailabilitySearchRe
 import { getCurrentMongoUser, UnauthorizedMongoUserError } from "@/lib/devUser";
 import { findMongoDeviceByIdentifier } from "@/lib/devices/mongoDeviceCatalog";
 import { getPricesApiUsageSnapshot } from "@/lib/quota/pricesApiQuota";
+import { productCatalog } from "@/data/seeds/productCatalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -249,7 +251,7 @@ function preferredSnapshot(
   return latestSnapshot ?? cachedSnapshot;
 }
 
-function buildAvailabilityModel(device: {
+interface ResolvedDevice {
   _id: string;
   id: string;
   slug?: string;
@@ -260,7 +262,10 @@ function buildAvailabilityModel(device: {
   category: string;
   estimatedPriceCents: number;
   typicalUsedPriceCents?: number;
-}): AvailabilityProductModel {
+  extraSearchQueries?: string[];
+}
+
+function buildAvailabilityModel(device: ResolvedDevice): AvailabilityProductModel {
   const query = buildQuery(device);
   return {
     id: device._id,
@@ -269,10 +274,26 @@ function buildAvailabilityModel(device: {
     displayName: device.displayName,
     category: device.category,
     estimatedPriceCents: catalogEstimateCents(device) ?? undefined,
-    searchQueries: [query],
+    searchQueries: [query, ...(device.extraSearchQueries ?? [])],
     allowUsed: true,
     deviceCatalogId: device.id,
     slug: device.slug ?? device.id,
+  };
+}
+
+function findStaticCatalogProduct(identifier: string): ResolvedDevice | null {
+  const entry = productCatalog.find((p) => p.id === identifier);
+  if (!entry) return null;
+
+  return {
+    _id: entry.id,
+    id: entry.id,
+    brand: entry.brand,
+    model: entry.model,
+    displayName: entry.displayName,
+    category: entry.category,
+    estimatedPriceCents: entry.estimatedPriceCents,
+    extraSearchQueries: entry.searchQueries,
   };
 }
 
@@ -302,7 +323,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       }
     }
 
-    const device = await findMongoDeviceByIdentifier(identifier);
+    const device: ResolvedDevice | null =
+      (await findMongoDeviceByIdentifier(identifier)) ?? findStaticCatalogProduct(identifier);
     if (!device) {
       return NextResponse.json({ error: "Could not find that catalog device." }, { status: 404 });
     }
@@ -333,47 +355,33 @@ export async function POST(request: Request): Promise<NextResponse> {
       return NextResponse.json(responseFromSnapshot("stale", cachedSnapshot, quotaSummaryBefore, fallbackEstimateCents));
     }
 
-    if (!isPricesApiConfigured()) {
-      const message = "Live pricing is not configured. Showing cached/catalog estimate.";
-      if (cachedSnapshot) {
-        return NextResponse.json(
-          responseFromSnapshot("error", cachedSnapshot, quotaSummaryBefore, fallbackEstimateCents, message, "PricesAPI is not configured."),
-        );
-      }
+    const mongoUser = await getCurrentMongoUser();
 
-      return NextResponse.json(
-        emptyResponse("error", quotaSummaryBefore, fallbackEstimateCents, message, "PricesAPI is not configured."),
-      );
-    }
+    // Try PricesAPI first, then fall back to Best Buy
+    let provider = isPricesApiConfigured()
+      ? getPricesApiProvider({ manualRefresh: true, forceRefresh, userId: mongoUser.id })
+      : null;
 
     const quotaAllowsLive = quotaBefore.minuteRemaining >= PRICES_API_LOOKUP_REQUEST_COST
       && quotaBefore.monthlyRemaining >= PRICES_API_LOOKUP_REQUEST_COST;
-    if (!quotaAllowsLive) {
-      const message = "Live price quota reached. Showing cached/catalog estimate.";
-      if (cachedSnapshot) {
-        return NextResponse.json(responseFromSnapshot("quota_limited", cachedSnapshot, quotaSummaryBefore, fallbackEstimateCents, message));
-      }
-
-      return NextResponse.json(emptyResponse("quota_limited", quotaSummaryBefore, fallbackEstimateCents, message));
+    if (provider && !quotaAllowsLive) {
+      provider = null;
     }
 
-    const mongoUser = await getCurrentMongoUser();
-    const provider = getPricesApiProvider({
-      manualRefresh: true,
-      forceRefresh,
-      userId: mongoUser.id,
-    });
+    if (!provider && isBestBuyConfigured()) {
+      provider = getBestBuyProvider({ forceRefresh });
+    }
 
     if (!provider) {
       const message = "Live pricing is not configured. Showing cached/catalog estimate.";
       if (cachedSnapshot) {
         return NextResponse.json(
-          responseFromSnapshot("error", cachedSnapshot, quotaSummaryBefore, fallbackEstimateCents, message, "PricesAPI is not configured."),
+          responseFromSnapshot("error", cachedSnapshot, quotaSummaryBefore, fallbackEstimateCents, message, "No pricing provider is configured."),
         );
       }
 
       return NextResponse.json(
-        emptyResponse("error", quotaSummaryBefore, fallbackEstimateCents, message, "PricesAPI is not configured."),
+        emptyResponse("error", quotaSummaryBefore, fallbackEstimateCents, message, "No pricing provider is configured."),
       );
     }
 

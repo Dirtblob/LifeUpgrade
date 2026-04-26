@@ -582,7 +582,7 @@ export function OnboardingFlow() {
             </div>
 
             <div className="rounded-2xl border border-moss/15 bg-moss/8 px-5 py-4 text-sm leading-7 text-ink/72">
-              Saving creates a profile in the local SQLite database and then sends the user straight to inventory so we
+              Saving creates a profile in MongoDB and then sends the user straight to inventory so we
               can capture current gear next.
             </div>
           </div>

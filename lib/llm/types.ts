@@ -116,6 +116,7 @@ export interface RecommendationNarratorProviderRequest {
   prompt: string;
   maxTokens?: number;
   temperature?: number;
+  responseSchema?: Record<string, unknown>;
 }
 
 export interface RecommendationNarratorProvider {

@@ -1,9 +1,8 @@
-import type { UserProfile as PrismaUserProfile } from "@prisma/client";
-import { db } from "@/lib/db";
-import { DEV_USER_ID, getCurrentMongoUser } from "@/lib/devUser";
+import { db, type UserProfileRecord } from "@/lib/db";
+import { DEV_USER_ID, getCurrentMongoUser, type MongoUser } from "@/lib/devUser";
 import { listInventoryItemsForUser, serializeInventoryItem, type MongoInventoryItem } from "@/lib/inventory/mongoInventory";
 import { parseProfileMetadata } from "@/lib/profileMetadata";
-import { hackathonDemoProfile, serializeHackathonDemoProfile } from "@/lib/recommendation/demoMode";
+import { serializeHackathonDemoProfile } from "@/lib/recommendation/demoMode";
 import type { InventoryCategory, PrivateRecommendationProfile, RecommendationInput, RoomConstraint, UserProblem, UserProfile } from "@/lib/recommendation/types";
 import {
   normalizeInventoryCategories,
@@ -13,18 +12,11 @@ import {
 } from "@/lib/recommendation/types";
 import { getUserPrivateProfileForUser, type UserPrivateProfile } from "@/lib/userPrivateProfiles";
 
-const CURRENT_USER_ID = hackathonDemoProfile.id;
-
 const defaultRoomConstraints = {
   deskWidthInches: 44,
   roomLighting: "mixed" as const,
   sharesSpace: true,
   portableSetup: false,
-};
-
-const defaultProfileSeed = {
-  id: CURRENT_USER_ID,
-  ...serializeHackathonDemoProfile(),
 };
 
 const problemKeywords: Array<[UserProblem, string[]]> = [
@@ -67,7 +59,7 @@ export interface InventoryListItem {
 
 export interface CurrentUserContext {
   userId: string;
-  profileRecord: PrismaUserProfile;
+  profileRecord: UserProfileRecord;
   inventoryRecords: MongoInventoryItem[];
   profile: UserProfile;
   inventory: InventoryListItem[];
@@ -198,7 +190,7 @@ function mapInventoryItem(record: MongoInventoryItem): InventoryListItem {
   };
 }
 
-function mapUserProfile(record: PrismaUserProfile): UserProfile {
+function mapUserProfile(record: UserProfileRecord): UserProfile {
   const roomConstraints = normalizeRoomConstraints(record.roomConstraints) as RoomConstraint[];
   const constraints = parseConstraintObject(record.roomConstraints);
 
@@ -233,6 +225,14 @@ function mapPrivateProfile(profile: UserPrivateProfile | null): PrivateRecommend
   };
 }
 
+export function displayNameForMongoUser(user: Pick<MongoUser, "authProvider" | "displayName" | "email">): string {
+  if (user.authProvider === "clerk") {
+    return user.displayName?.trim() || user.email?.trim() || "Current user";
+  }
+
+  return "Current user";
+}
+
 async function loadMongoUserContext(): Promise<{
   userId: string;
   inventoryRecords: MongoInventoryItem[];
@@ -260,21 +260,41 @@ async function loadMongoUserContext(): Promise<{
   }
 }
 
-export async function ensureCurrentUserProfile(): Promise<PrismaUserProfile> {
-  return db.userProfile.upsert({
-    where: { id: CURRENT_USER_ID },
+export async function ensureCurrentUserProfile(): Promise<UserProfileRecord> {
+  const user = await getCurrentMongoUser();
+  const profileData = {
+    ...serializeHackathonDemoProfile(),
+    name: displayNameForMongoUser(user),
+  };
+  const profile = await db.userProfile.upsert({
+    where: { id: user.id },
     update: {},
-    create: defaultProfileSeed,
-  });
+    create: {
+      id: user.id,
+      ...profileData,
+    },
+  }) as UserProfileRecord | null;
+
+  if (!profile) {
+    throw new Error("Failed to create current user profile.");
+  }
+
+  return profile;
+}
+
+export async function getCurrentUserProfileRecord(): Promise<UserProfileRecord | null> {
+  const user = await getCurrentMongoUser();
+
+  return db.userProfile.findUnique({
+    where: { id: user.id },
+  }) as Promise<UserProfileRecord | null>;
 }
 
 export async function getCurrentUserContext(): Promise<CurrentUserContext | null> {
-  let profileRecord: PrismaUserProfile | null;
+  let profileRecord: UserProfileRecord | null;
 
   try {
-    profileRecord = await db.userProfile.findUnique({
-      where: { id: CURRENT_USER_ID },
-    });
+    profileRecord = await getCurrentUserProfileRecord();
   } catch (error) {
     console.warn("Unable to load the active profile.", error);
     return null;

@@ -376,6 +376,92 @@ describe("recommendation narrator", () => {
     expect(result.output.confidenceNote).toContain("88/100");
   });
 
+  it("accepts exact Gemma JSON wrapped in a fenced code block", async () => {
+    const provider = {
+      name: "gemma",
+      completeJson: async () =>
+        [
+          "```json",
+          JSON.stringify({
+            headline: "A calmer monitor upgrade",
+            explanation: "This explains the deterministic monitor recommendation without changing the score.",
+            whyThisHelps: "It connects the larger screen to the listed eye strain and posture problems.",
+            tradeoffs: "It still needs desk space and the right connection.",
+            whyNotCheaper: "The cheaper option would lose important comfort or connectivity fit.",
+            whyNotMoreExpensive: "A pricier model would not add enough extra impact for this budget.",
+            confidenceNote: "The underlying 88/100 deterministic score remains unchanged.",
+            followUpQuestion: "Do you want to confirm desk depth before buying?",
+          }),
+          "```",
+        ].join("\n"),
+    };
+
+    const result = await narrateRecommendation(
+      {
+        profile: profile(),
+        inventory: [inventoryItem()],
+        exactCurrentModelsProvided: true,
+        categoryRecommendation: {
+          category: "monitor",
+          score: 84,
+          reasons: ["A monitor is the highest-impact screen upgrade."],
+        },
+        productRecommendation: recommendation(),
+        availability: availability(),
+      },
+      { provider },
+    );
+
+    expect(result.source).toBe("gemma");
+    expect(result.output.headline).toBe("A calmer monitor upgrade");
+  });
+
+  it("asks Gemma for the exact narration response schema", async () => {
+    const requests: Array<{ responseSchema?: Record<string, unknown> }> = [];
+    const provider = {
+      name: "gemma",
+      completeJson: async (request: { responseSchema?: Record<string, unknown> }) => {
+        requests.push(request);
+        return JSON.stringify({
+          headline: "A calmer monitor upgrade",
+          explanation: "This explains the deterministic monitor recommendation without changing the score.",
+          whyThisHelps: "It connects the larger screen to the listed eye strain and posture problems.",
+          tradeoffs: "It still needs desk space and the right connection.",
+          whyNotCheaper: "The cheaper option would lose important comfort or connectivity fit.",
+          whyNotMoreExpensive: "A pricier model would not add enough extra impact for this budget.",
+          confidenceNote: "The underlying 88/100 deterministic score remains unchanged.",
+          followUpQuestion: "Do you want to confirm desk depth before buying?",
+        });
+      },
+    };
+
+    await narrateRecommendation(
+      {
+        profile: profile(),
+        inventory: [inventoryItem()],
+        exactCurrentModelsProvided: true,
+        categoryRecommendation: {
+          category: "monitor",
+          score: 84,
+          reasons: ["A monitor is the highest-impact screen upgrade."],
+        },
+        productRecommendation: recommendation(),
+        availability: availability(),
+      },
+      { provider },
+    );
+
+    expect(requests[0]?.responseSchema).toMatchObject({
+      type: "OBJECT",
+      properties: {
+        headline: { type: "STRING" },
+        explanation: { type: "STRING" },
+        followUpQuestion: { type: "STRING" },
+      },
+      required: expect.arrayContaining(["headline", "explanation", "followUpQuestion"]),
+    });
+  });
+
   it("falls back when model output includes fields outside the exact JSON shape", async () => {
     const provider = {
       name: "gemma",

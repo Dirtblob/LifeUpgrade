@@ -5,7 +5,8 @@ import { getCachedAvailabilitySummaries } from "@/lib/availability";
 import { availabilityDetailMessages } from "@/lib/availability/display";
 import { loadCachedRecommendationPriceSnapshots } from "@/lib/availability/priceSnapshots";
 import { recordRecentlyViewedProduct } from "@/lib/jobs/selectProductsForRefresh";
-import { loadMongoRecommendationProducts, recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { productCatalog } from "@/data/seeds/productCatalog";
 import { getCategoryRecommendations } from "@/lib/recommendation/categoryEngine";
 import { getProductRecommendations } from "@/lib/recommendation/productEngine";
 import { categoryLabels } from "@/lib/recommendation/scoring";
@@ -22,7 +23,7 @@ interface ProductPageProps {
 export default async function ProductPage({ params }: ProductPageProps) {
   const { id } = await params;
   const context = await loadRecommendationContext();
-  const candidateProducts = context?.candidateProducts ?? (await loadMongoRecommendationProducts());
+  const candidateProducts = context?.candidateProducts ?? productCatalog;
   const product = candidateProducts.find((candidate) => candidate.id === id);
   if (!product) notFound();
 
@@ -71,7 +72,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           </p>
           <h1 className="mt-3 text-4xl font-semibold">{product.name}</h1>
           <p className="mt-2 text-lg text-ink/60">
-            {product.brand} · ${product.priceUsd}
+            {product.brand}{product.priceUsd > 0 ? ` · $${product.priceUsd}` : ""}
           </p>
           <p className="mt-5 max-w-3xl leading-8 text-ink/70">{product.shortDescription}</p>
           <div className="mt-6 flex flex-wrap gap-2">
@@ -86,7 +87,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-ink/60">Price</p>
-              <p className="mt-2 text-3xl font-semibold">${product.priceUsd}</p>
+              <p className="mt-2 text-3xl font-semibold">{product.priceUsd > 0 ? `$${product.priceUsd}` : "Price TBD"}</p>
             </div>
             <ScoreBadge score={recommendation?.score ?? 0} />
           </div>
@@ -98,7 +99,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <span className="font-semibold">Current best price:</span>{" "}
               {recommendation?.currentBestPriceCents
                 ? `$${Math.round(recommendation.currentBestPriceCents / 100)}`
-                : `$${product.priceUsd}`}
+                : product.priceUsd > 0 ? `$${product.priceUsd}` : "Not checked"}
             </p>
             <p>
               <span className="font-semibold">Provider:</span> {availability.provider ?? "Not configured"}

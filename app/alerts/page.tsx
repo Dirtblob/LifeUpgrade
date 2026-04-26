@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ActionButton } from "@/components/ui/ActionButton";
-import { ensureCurrentUserProfile } from "@/lib/currentUser";
+import { getCurrentUserProfileRecord } from "@/lib/currentUser";
 import { db } from "@/lib/db";
 import { productCatalog } from "@/data/seeds/productCatalog";
 import { markAlertSeenAction } from "./actions";
@@ -25,13 +25,15 @@ function formatDate(value: Date): string {
 }
 
 export default async function AlertsPage() {
-  const profile = await ensureCurrentUserProfile();
-  const alerts = await db.watchlistAlert.findMany({
-    where: {
-      userProfileId: profile.id,
-    },
-    orderBy: [{ seen: "asc" }, { createdAt: "desc" }],
-  });
+  const profile = await getCurrentUserProfileRecord();
+  const alerts = profile
+    ? await db.watchlistAlert.findMany({
+        where: {
+          userProfileId: profile.id,
+        },
+        orderBy: [{ seen: "asc" }, { createdAt: "desc" }],
+      })
+    : [];
   const unreadCount = alerts.filter((alert) => !alert.seen).length;
 
   return (

@@ -1,5 +1,5 @@
-import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { getBestBuyProvider } from "./bestBuyProvider";
 import { isFreshPriceCheck } from "./cachePolicy";
 import { mockAvailabilityProvider } from "./mockProvider";
 import { compareAvailabilityResults } from "./offerMatcher";
@@ -61,6 +61,12 @@ function getConfiguredProvider(
     }) ?? mockAvailabilityProvider;
   }
 
+  if (configuredProvider === "bestbuy" || configuredProvider === "best_buy") {
+    return getBestBuyProvider({
+      forceRefresh: options.forceRefresh,
+    }) ?? mockAvailabilityProvider;
+  }
+
   return availabilityProviders[configuredProvider] ?? null;
 }
 
@@ -74,7 +80,7 @@ function buildCheckingSummary(
     provider: null,
     productModelId,
     status: "checking_not_configured",
-    label: "Checking not configured",
+    label: "Availability unknown",
     listings: [],
     bestListing: null,
     checkedAt: null,
@@ -251,7 +257,23 @@ async function persistSummaries(
   productModels: AvailabilityProductModel[],
   summaries: Map<string, AvailabilitySummary>,
 ): Promise<void> {
-  const snapshotRows: Prisma.AvailabilitySnapshotCreateManyInput[] = [];
+  const snapshotRows: Array<{
+    productModelId: string;
+    provider: string;
+    title: string;
+    brand: string | null;
+    model: string | null;
+    retailer: string | null;
+    available: boolean;
+    priceCents: number | null;
+    shippingCents: number | null;
+    totalPriceCents: number | null;
+    condition: string | null;
+    url: string | null;
+    imageUrl: string | null;
+    confidence: number | null;
+    checkedAt: Date;
+  }> = [];
 
   productModels.forEach((productModel) => {
     const summary = summaries.get(productModel.id);
@@ -346,7 +368,7 @@ export async function getAvailabilitySummaries(
     );
   }
 
-  const isPricesApiProvider = provider.name === getPricesApiProviderName();
+  const isRateLimitedProvider = provider.name === getPricesApiProviderName() || provider.name === "bestbuy";
   const summarizeProductModel = async (productModel: AvailabilityProductModel) => {
     const cachedSummary = cachedSummaries[productModel.id];
     const isRefreshEligible = refreshProductIds.has(productModel.id);
@@ -385,11 +407,11 @@ export async function getAvailabilitySummaries(
       throw error;
     }
   };
-  const summaryEntries = isPricesApiProvider
+  const summaryEntries = isRateLimitedProvider
     ? []
     : await Promise.all(productModels.map((productModel) => summarizeProductModel(productModel)));
 
-  if (isPricesApiProvider) {
+  if (isRateLimitedProvider) {
     for (const productModel of productModels) {
       summaryEntries.push(await summarizeProductModel(productModel));
     }

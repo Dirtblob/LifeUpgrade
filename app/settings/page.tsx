@@ -2,11 +2,18 @@ import Link from "next/link";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { MongoMigrationPanel } from "@/components/MongoMigrationPanel";
 import { db } from "@/lib/db";
+import { getCurrentMongoUser } from "@/lib/devUser";
 import { countDevInventoryItems } from "@/lib/inventory/mongoInventory";
-import { hackathonDemoProfile } from "@/lib/recommendation/demoMode";
 import { deleteLocalInventoryAction, deleteLocalProfileAction } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+interface ProfileWithCounts {
+  _count: {
+    recommendations: number;
+    savedProducts: number;
+  };
+}
 
 const controlCards = [
   {
@@ -46,7 +53,7 @@ const controlCards = [
   },
   {
     title: "Delete inventory",
-    body: "Clear owned items and generated recommendations while keeping profile preferences.",
+    body: "Clear owned items, generated recommendations, saved products, and alerts while keeping profile preferences.",
     action: (
       <form action={deleteLocalInventoryAction} className="mt-4">
         <ActionButton pendingText="Clearing..." variant="secondary" className="px-4 py-2">
@@ -58,8 +65,9 @@ const controlCards = [
 ] as const;
 
 export default async function SettingsPage() {
+  const user = await getCurrentMongoUser();
   const profile = await db.userProfile.findUnique({
-    where: { id: hackathonDemoProfile.id },
+    where: { id: user.id },
     include: {
       _count: {
         select: {
@@ -68,7 +76,7 @@ export default async function SettingsPage() {
         },
       },
     },
-  });
+  }) as ProfileWithCounts | null;
   const inventoryCount = await countDevInventoryItems();
 
   return (
@@ -77,8 +85,8 @@ export default async function SettingsPage() {
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-moss">Settings</p>
         <h1 className="mt-3 text-3xl font-semibold">Privacy controls for your local setup.</h1>
         <p className="mt-3 max-w-2xl leading-7 text-ink/65">
-          Sensitive profile fields stay in SQLite instead of localStorage. These controls manage the active local demo
-          profile used by onboarding, inventory, and recommendations.
+          Sensitive profile fields stay in MongoDB instead of localStorage. These controls manage the active profile used by
+          onboarding, inventory, and recommendations.
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-3">
           {[

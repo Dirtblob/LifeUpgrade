@@ -100,7 +100,7 @@ export function LivePricePanel({ deviceCatalogId, slug, initialState, className 
             {state.bestOffer ? formatUsdFromCents(state.bestOffer.totalPriceCents) : state.catalogEstimateCents !== null ? formatUsdFromCents(state.catalogEstimateCents) : "No price yet"}
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-300">
-            {state.bestOffer?.title ?? "Showing the catalog estimate until a matching live offer is available."}
+            {state.bestOffer?.title ?? (state.catalogEstimateCents !== null ? "Showing the catalog estimate until a matching live offer is available." : "Click \"Check live deals\" to search for offers.")}
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3">

@@ -16,7 +16,7 @@ import type {
 } from "./types";
 import { explainProductRecommendation } from "./explanations";
 import { scoreErgonomicFit } from "./fitScoring";
-import { rankCategories } from "./scoring";
+import { getCategoryRecommendations } from "./categoryEngine";
 import { scoreToFit } from "./scoring";
 
 const FINAL_WEIGHTS = {
@@ -52,10 +52,8 @@ function productPriceUsd(product: Product): number {
 }
 
 function productExpectedPriceCents(product: Product): number {
-  return Math.max(
-    1,
-    Math.round(product.estimatedPriceCents ?? product.typicalUsedPriceCents ?? product.priceUsd * 100),
-  );
+  const raw = product.estimatedPriceCents ?? product.typicalUsedPriceCents ?? (product.priceUsd > 0 ? product.priceUsd * 100 : 0);
+  return raw > 0 ? Math.round(raw) : 0;
 }
 
 function requiredDeskWidth(product: Product): number | undefined {
@@ -169,7 +167,7 @@ export function rankProducts(profile: UserProfile, inventory: InventoryItem[]): 
 export function rankProductsForInput(input: RecommendationInput): ProductRecommendation[] {
   const productCatalog = input.candidateProducts ?? defaultProductCatalog;
 
-  return rankCategories(input.profile, input.inventory)
+  return getCategoryRecommendations(input)
     .flatMap((categoryRecommendation) =>
       getProductRecommendations(input, categoryRecommendation, productCatalog),
     )
@@ -217,8 +215,8 @@ function buildRecommendation(
       (item) => item.category === "laptop" && (item.condition === "poor" || item.condition === "fair"),
     );
     if (weakCurrentLaptop) {
-      problemFit = clampScore(problemFit - 18);
-      traitDeltaFit = clampScore(traitDeltaFit - 10);
+      problemFit = clampScore(problemFit - 28);
+      traitDeltaFit = clampScore(traitDeltaFit - 20);
     }
   }
 
@@ -475,12 +473,14 @@ function buildReasons(
   fitReasons: string[] = [],
 ): string[] {
   const solvedProblems = input.profile.problems.filter((problem) => product.solves.includes(problem));
-  const reasons = [...categoryRecommendation.reasons];
+  const reasons: string[] = [];
   const displayedPriceUsd = Math.round(effectivePriceCents(product, pricing) / 100);
 
   if (hasUnratedSameCategoryInventory(product, input.inventory)) {
     reasons.push(unratedInventoryExplanation);
   }
+
+  reasons.push(...categoryRecommendation.reasons);
 
   if (solvedProblems.length > 0) {
     reasons.push(`${product.name} directly targets ${formatProblemList(solvedProblems)}.`);

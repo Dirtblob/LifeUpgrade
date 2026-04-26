@@ -54,7 +54,7 @@ function withCachedSkipReason(
     provider: null,
     productModelId,
     status: "checking_not_configured",
-    label: "Checking not configured",
+    label: "Availability unknown",
     listings: [],
     bestListing: null,
     checkedAt: null,

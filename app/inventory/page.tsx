@@ -55,8 +55,8 @@ export default async function InventoryPage({ searchParams }: InventoryPageProps
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-clay">Inventory</p>
         <h1 className="mt-3 font-display text-3xl font-semibold">Create a profile before adding inventory.</h1>
         <p className="mx-auto mt-4 max-w-2xl leading-7 text-ink/65">
-          Inventory belongs to the active local profile. Complete onboarding or run demo mode from the landing page to
-          create that profile first.
+          Inventory belongs to your active profile. Complete onboarding or run demo mode from the landing page to create
+          that profile first.
         </p>
         <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
           <Link href="/onboarding" className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white">

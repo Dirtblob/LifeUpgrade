@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { displayNameForMongoUser } from "@/lib/currentUser";
+import { getCurrentMongoUser } from "@/lib/devUser";
 import { replaceDevInventoryItems } from "@/lib/inventory/mongoInventory";
 import {
   buildRoomConstraints,
@@ -10,11 +12,10 @@ import {
   type OnboardingFormValues,
   validateOnboardingValues,
 } from "@/lib/onboarding";
-import { hackathonDemoProfile } from "@/lib/recommendation/demoMode";
 
-function serializeProfile(values: OnboardingFormValues) {
+function serializeProfile(values: OnboardingFormValues, name: string) {
   return {
-    name: values.profession.trim(),
+    name,
     ageRange: values.ageRange,
     profession: values.profession.trim(),
     budgetCents: Math.round(Number(values.budgetAmount) * 100),
@@ -44,28 +45,28 @@ async function createProfile(
   }
 
   try {
-    const profile = await db.$transaction(async (tx) => {
-      const profileData = serializeProfile(values);
-      const createdProfile = await tx.userProfile.upsert({
-        where: { id: hackathonDemoProfile.id },
-        update: profileData,
-        create: {
-          id: hackathonDemoProfile.id,
-          ...profileData,
-        },
-      });
+    const mongoUser = await getCurrentMongoUser();
+    const profileData = serializeProfile(values, displayNameForMongoUser(mongoUser));
+    const profile = await db.userProfile.upsert({
+      where: { id: mongoUser.id },
+      update: profileData,
+      create: {
+        id: mongoUser.id,
+        ...profileData,
+      },
+    });
+    if (!profile) {
+      throw new Error("Failed to save onboarding profile.");
+    }
 
-      await tx.recommendation.deleteMany({
-        where: { userProfileId: createdProfile.id },
-      });
-
-      if (options?.demo) {
-        await tx.savedProduct.deleteMany({
-          where: { userProfileId: createdProfile.id },
-        });
-      }
-
-      return createdProfile;
+    await db.recommendation.deleteMany({
+      where: { userProfileId: profile.id },
+    });
+    await db.savedProduct.deleteMany({
+      where: { userProfileId: profile.id },
+    });
+    await db.watchlistAlert.deleteMany({
+      where: { userProfileId: profile.id },
     });
 
     if (options?.demo) {
@@ -89,6 +90,7 @@ async function createProfile(
     revalidatePath("/inventory");
     revalidatePath("/recommendations");
     revalidatePath("/settings");
+    revalidatePath("/alerts");
 
     return {
       success: true,

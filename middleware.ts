@@ -24,11 +24,13 @@ const clerkIsConfigured = Boolean(
 );
 
 const authMiddleware = clerkMiddleware(async (auth, request) => {
-  await auth.protect();
+  if (!isPublicRoute(request) && !isApiRoute(request)) {
+    await auth.protect();
+  }
 });
 
 export default function middleware(request: NextRequest, event: NextFetchEvent) {
-  if (!clerkIsConfigured || isPublicRoute(request) || isApiRoute(request)) {
+  if (!clerkIsConfigured) {
     return NextResponse.next();
   }
 

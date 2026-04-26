@@ -19,7 +19,8 @@ import {
   updateDevInventoryItem,
   validateInventoryCreateInput,
 } from "@/lib/inventory/mongoInventory";
-import { loadMongoRecommendationProducts, recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { recommendationProductToAvailabilityModel } from "@/lib/recommendation/mongoDeviceProducts";
+import { productCatalog } from "@/data/seeds/productCatalog";
 import { rankProductsForInput } from "@/lib/recommendation/productEngine";
 import { saveRecommendationRunLog } from "@/lib/recommendation/recommendationLogs";
 import { buildToastHref } from "@/lib/ui/toasts";
@@ -170,6 +171,7 @@ function revalidateInventoryViews(): void {
   revalidatePath("/inventory");
   revalidatePath("/recommendations");
   revalidatePath("/admin/enrichment-candidates");
+  revalidatePath("/alerts");
 }
 
 async function requireCurrentUserContext(): Promise<CurrentUserContext> {
@@ -290,6 +292,12 @@ export async function loadDemoInventoryAction(): Promise<void> {
     db.recommendation.deleteMany({
       where: { userProfileId: profileRecord.id },
     }),
+    db.savedProduct.deleteMany({
+      where: { userProfileId: profileRecord.id },
+    }),
+    db.watchlistAlert.deleteMany({
+      where: { userProfileId: profileRecord.id },
+    }),
     replaceDevInventoryItems([
       {
         category: "laptop",
@@ -355,7 +363,7 @@ function priorityForScore(score: number): "CRITICAL" | "HIGH" | "MEDIUM" | "LOW"
 
 export async function generateRecommendationsAction(): Promise<void> {
   const context = await requireCurrentUserContext();
-  const candidateProducts = await loadMongoRecommendationProducts();
+  const candidateProducts = productCatalog;
   const availabilityProductModels = candidateProducts.map((product) =>
     recommendationProductToAvailabilityModel(product, { allowUsed: context.profileRecord.usedItemsOkay }),
   );

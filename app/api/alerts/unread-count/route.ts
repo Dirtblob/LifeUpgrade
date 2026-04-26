@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
-import { ensureCurrentUserProfile } from "@/lib/currentUser";
+import { getCurrentUserProfileRecord } from "@/lib/currentUser";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  if (!process.env.DATABASE_URL?.trim()) {
-    return NextResponse.json({ unreadCount: 0, configured: false });
-  }
-
   try {
-    const profile = await ensureCurrentUserProfile();
+    const profile = await getCurrentUserProfileRecord();
+    if (!profile) {
+      return NextResponse.json({ unreadCount: 0, configured: true });
+    }
+
     const unreadCount = await db.watchlistAlert.count({
       where: {
         userProfileId: profile.id,

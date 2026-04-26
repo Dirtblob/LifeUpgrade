@@ -144,7 +144,7 @@ export function buildLLMRecommendationInput({
     availability: {
       provider: availability?.provider ?? null,
       status: availability?.status ?? "checking_not_configured",
-      label: availability?.label ?? "Checking not configured",
+      label: availability?.label ?? "Availability unknown",
       refreshSource: availability?.refreshSource ?? "not_configured",
       refreshSkippedReason: availability?.refreshSkippedReason,
       checkedAtIso: availability?.checkedAt?.toISOString() ?? null,
@@ -165,7 +165,15 @@ function extractJSONObject(raw: string): unknown {
   try {
     return JSON.parse(trimmed);
   } catch {
-    return null;
+    const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const candidate = fencedMatch?.[1]?.trim();
+    if (!candidate) return null;
+
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -223,6 +231,30 @@ function fallbackWithInputGuards(
 
   return merged;
 }
+
+const recommendationNarrationResponseSchema = {
+  type: "OBJECT",
+  properties: {
+    headline: { type: "STRING" },
+    explanation: { type: "STRING" },
+    tradeoffs: { type: "STRING" },
+    whyThisHelps: { type: "STRING" },
+    whyNotCheaper: { type: "STRING" },
+    whyNotMoreExpensive: { type: "STRING" },
+    confidenceNote: { type: "STRING" },
+    followUpQuestion: { type: "STRING" },
+  },
+  required: [
+    "headline",
+    "explanation",
+    "tradeoffs",
+    "whyThisHelps",
+    "whyNotCheaper",
+    "whyNotMoreExpensive",
+    "confidenceNote",
+    "followUpQuestion",
+  ],
+} as const;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -333,6 +365,7 @@ export async function narrateRecommendation(
       prompt: buildRecommendationNarrationPrompt(input),
       maxTokens: 500,
       temperature: 0.2,
+      responseSchema: recommendationNarrationResponseSchema,
     });
     const parsed = parseNarrationOutput(raw);
     if (!parsed) {

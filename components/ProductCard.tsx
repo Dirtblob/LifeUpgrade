@@ -23,7 +23,7 @@ export function ProductCard({ product, availability }: ProductCardProps) {
         </p>
         <h3 className="mt-3 font-display text-xl font-semibold">{product.name}</h3>
         <p className="mt-1 text-sm text-slate-200/78">
-          {product.brand} · {formatUsd(product.priceUsd)}
+          {product.brand}{product.priceUsd > 0 ? ` · ${formatUsd(product.priceUsd)}` : ""}
         </p>
       </div>
       <div className="flex-1">
@@ -40,7 +40,7 @@ export function ProductCard({ product, availability }: ProductCardProps) {
         <div>
           <div className="flex flex-wrap gap-2">
             <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">
-              {availability?.label ?? "Checking not configured"}
+              {availability?.label ?? "Availability unknown"}
             </span>
             <span className={`rounded-full px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] ${priceStatusBadge.className}`}>
               {priceStatusBadge.label}

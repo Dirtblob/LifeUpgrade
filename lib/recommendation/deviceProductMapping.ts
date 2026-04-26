@@ -19,6 +19,20 @@ const categoryProblemDefaults: Record<ProductCategory, UserProblem[]> = {
   cable_management: ["clutter", "small_space", "poor_focus"],
 };
 
+const categoryEstimatedPriceCents: Record<ProductCategory, number> = {
+  laptop: 99900,
+  monitor: 29900,
+  laptop_stand: 3999,
+  keyboard: 8999,
+  mouse: 6999,
+  chair: 34900,
+  desk_lamp: 5999,
+  headphones: 19900,
+  webcam: 7999,
+  storage: 6999,
+  cable_management: 4999,
+};
+
 function toProductCategory(category: string): ProductCategory | null {
   if (productCategorySet.has(category)) return category as ProductCategory;
   if (category === "earbuds") return "headphones";
@@ -95,8 +109,8 @@ export function deviceToRecommendationProduct(device: MongoCatalogDevice): Produ
   if (!category) return null;
 
   const traits = device.traitRatings;
-  const estimatedPriceCents = device.estimatedPriceCents || device.typicalUsedPriceCents || 100;
-  const priceUsd = Math.max(1, Math.round(estimatedPriceCents / 100));
+  const estimatedPriceCents = device.estimatedPriceCents || device.typicalUsedPriceCents || categoryEstimatedPriceCents[category];
+  const priceUsd = Math.round(estimatedPriceCents / 100);
   const strengths = device.strengths.length > 0 ? device.strengths : [`Strong ${category.replaceAll("_", " ")} trait fit`];
 
   return {

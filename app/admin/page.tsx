@@ -275,7 +275,7 @@ export default async function AdminDashboardPage() {
                       </span>
                     </div>
                     <p className="mt-2 text-sm leading-6 text-ink/68">
-                      {recommendation.userProfile.name ?? recommendation.userProfile.profession} · {recommendation.category.replaceAll("_", " ")}
+                      {recommendation.userProfile?.name ?? recommendation.userProfile?.profession ?? "Profile"} · {recommendation.category.replaceAll("_", " ")}
                     </p>
                     <p className="mt-1 text-xs uppercase tracking-[0.14em] text-ink/42">
                       Generated {formatDateTime(recommendation.createdAt)}

@@ -103,12 +103,28 @@ export function isSmallSpaceFriendly(
   return requiredWidth <= Math.min(profile.constraints.deskWidthInches, 36);
 }
 
+export function isDisplayableProduct(
+  recommendation: ProductRecommendation,
+  availability: AvailabilitySummary,
+): boolean {
+  if (availability.status === "unavailable") return false;
+
+  const hasCatalogPrice = recommendation.product.priceUsd > 0
+    || (recommendation.product.estimatedPriceCents != null && recommendation.product.estimatedPriceCents > 0)
+    || (recommendation.product.typicalUsedPriceCents != null && recommendation.product.typicalUsedPriceCents > 0);
+  const hasLivePrice = recommendation.currentBestPriceCents != null && recommendation.currentBestPriceCents > 0;
+  if (!hasCatalogPrice && !hasLivePrice) return false;
+
+  return true;
+}
+
 export function matchesFilters(
   recommendation: ProductRecommendation,
   availability: AvailabilitySummary,
   filters: RecommendationFilters,
   profile: UserProfile,
 ): boolean {
+  if (!isDisplayableProduct(recommendation, availability)) return false;
   if (filters.underBudgetOnly && recommendation.product.priceUsd > profile.budgetUsd) return false;
   if (filters.availableOnly && availability.status !== "available") return false;
   if (filters.quietProductsOnly && !recommendation.product.constraints.quiet) return false;

@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { productCatalog } from "@/data/seeds/productCatalog";
+import { displayNameForMongoUser } from "@/lib/currentUser";
 import { db } from "@/lib/db";
+import { getCurrentMongoUser } from "@/lib/devUser";
 import { refreshPrices } from "@/lib/jobs/refreshPrices";
 import { getPricesApiProviderName } from "@/lib/availability/pricesApiProvider";
 import { deleteDevInventoryItems, replaceDevInventoryItems } from "@/lib/inventory/mongoInventory";
@@ -11,7 +13,6 @@ import { getPricesApiUsageSnapshot } from "@/lib/quota/pricesApiQuota";
 import {
   buildHackathonDemoRecommendationInput,
   hackathonDemoInventoryRecords,
-  hackathonDemoProfile,
   serializeHackathonDemoProfile,
 } from "@/lib/recommendation/demoMode";
 import { rankProductsForInput } from "@/lib/recommendation/productEngine";
@@ -40,56 +41,65 @@ function revalidateAdminPaths(): void {
 }
 
 export async function runAdminDemoProfileAction(): Promise<void> {
-  const profileData = serializeHackathonDemoProfile();
+  const mongoUser = await getCurrentMongoUser();
+  const profileName = displayNameForMongoUser(mongoUser);
+  const profileData = {
+    ...serializeHackathonDemoProfile(),
+    name: profileName,
+  };
   const [availabilityByProductId, pricingByProductId] = await Promise.all([
     getCachedAvailabilitySummaries(productCatalog),
     loadCachedRecommendationPriceSnapshots(productCatalog),
   ]);
+  const demoInput = buildHackathonDemoRecommendationInput();
   const recommendationInput = {
-    ...buildHackathonDemoRecommendationInput(),
+    ...demoInput,
+    profile: {
+      ...demoInput.profile,
+      id: mongoUser.id,
+      name: profileName,
+    },
     availabilityByProductId,
     pricingByProductId,
   };
   const recommendations = rankProductsForInput(recommendationInput).slice(0, 8);
 
-  await db.$transaction(async (tx) => {
-    await tx.userProfile.upsert({
-      where: { id: hackathonDemoProfile.id },
-      update: profileData,
-      create: {
-        id: hackathonDemoProfile.id,
-        ...profileData,
-      },
-    });
-
-    await tx.savedProduct.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
-    });
-    await tx.watchlistAlert.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
-    });
-    await tx.recommendation.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
-    });
-
-    if (recommendations.length > 0) {
-      await tx.recommendation.createMany({
-        data: recommendations.map((recommendation) => ({
-          userProfileId: hackathonDemoProfile.id,
-          category: recommendation.product.category,
-          productModelId: recommendation.product.id,
-          score: recommendation.score,
-          priority: priorityForScore(recommendation.score),
-          problemSolved: JSON.stringify(
-            recommendationInput.profile.problems
-              .filter((problem) => recommendation.product.solves.includes(problem))
-              .slice(0, 4),
-          ),
-          explanation: recommendation.explanation.problemSolved,
-        })),
-      });
-    }
+  await db.userProfile.upsert({
+    where: { id: mongoUser.id },
+    update: profileData,
+    create: {
+      id: mongoUser.id,
+      ...profileData,
+    },
   });
+
+  await db.savedProduct.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+  await db.watchlistAlert.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+  await db.recommendation.deleteMany({
+    where: { userProfileId: mongoUser.id },
+  });
+
+  if (recommendations.length > 0) {
+    await db.recommendation.createMany({
+      data: recommendations.map((recommendation) => ({
+        userProfileId: mongoUser.id,
+        category: recommendation.product.category,
+        productModelId: recommendation.product.id,
+        score: recommendation.score,
+        priority: priorityForScore(recommendation.score),
+        problemSolved: JSON.stringify(
+          recommendationInput.profile.problems
+            .filter((problem) => recommendation.product.solves.includes(problem))
+            .slice(0, 4),
+        ),
+        explanation: recommendation.explanation.problemSolved,
+      })),
+    });
+  }
 
   await replaceDevInventoryItems(
     hackathonDemoInventoryRecords.map((item) => ({
@@ -178,18 +188,20 @@ export async function testGemmaExplanationAction(): Promise<void> {
 }
 
 export async function clearAdminDemoDataAction(): Promise<void> {
+  const mongoUser = await getCurrentMongoUser();
+
   await db.$transaction([
     db.watchlistAlert.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+      where: { userProfileId: mongoUser.id },
     }),
     db.savedProduct.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+      where: { userProfileId: mongoUser.id },
     }),
     db.recommendation.deleteMany({
-      where: { userProfileId: hackathonDemoProfile.id },
+      where: { userProfileId: mongoUser.id },
     }),
     db.userProfile.deleteMany({
-      where: { id: hackathonDemoProfile.id },
+      where: { id: mongoUser.id },
     }),
   ]);
   await deleteDevInventoryItems();
